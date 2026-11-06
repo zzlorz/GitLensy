@@ -7,6 +7,7 @@ import type {
   RecentRepo,
   CommitInfo,
   CommitFile,
+  SyncStatus,
 } from "../types";
 
 // Repository commands
@@ -132,6 +133,16 @@ export async function discardAllUnstaged(): Promise<void> {
 /** 提交暂存区内容 */
 export async function commitChanges(message: string): Promise<void> {
   return invoke<void>("commit_changes", { message });
+}
+
+/** 查询当前分支与上游远程的领先/落后提交数 */
+export async function getSyncStatus(): Promise<SyncStatus> {
+  return invoke<SyncStatus>("get_sync_status");
+}
+
+/** 同步到远程仓库（落后时先快进拉取，再推送） */
+export async function syncChanges(): Promise<void> {
+  return invoke<void>("sync_changes");
 }
 
 /** 动态同步更新原生窗口标题栏主题（暗色 / 亮色） */

@@ -12,8 +12,8 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import FolderTree from "../components/FolderTree";
 import FilePreview from "../components/FilePreview";
 import RepoAvatar from "../components/RepoAvatar";
-import type { RepositoryInfo, GitStatus, ChangedFile, DiffView, FileDiff, CommitInfo, CommitFile, RecentRepo } from "../types";
-import { getStatus, getFileDiff, saveCurrentRepo, getCommitLog, getCommitFiles, getCommitFileDiff, openTerminal, revertFile, stageFile, stageAll, discardAllUnstaged, commitChanges, getRecentRepos, openRepository, removeRecentRepo } from "../api/tauri";
+import type { RepositoryInfo, GitStatus, ChangedFile, DiffView, FileDiff, CommitInfo, CommitFile, RecentRepo, SyncStatus } from "../types";
+import { getStatus, getFileDiff, saveCurrentRepo, getCommitLog, getCommitFiles, getCommitFileDiff, openTerminal, revertFile, stageFile, stageAll, discardAllUnstaged, commitChanges, getSyncStatus, syncChanges, getRecentRepos, openRepository, removeRecentRepo } from "../api/tauri";
 
 const PAGE_SIZE = 50;
 
@@ -104,6 +104,9 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
   /** 变更 tab 的提交信息与提交状态 */
   const [commitMessage, setCommitMessage] = useState("");
   const [committing, setCommitting] = useState(false);
+  /** 当前分支与远程的同步状态 */
+  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
+  const [syncing, setSyncing] = useState(false);
 
   // ── Changes tab state ─────────────────────────────────────────────────
   const [status, setStatus] = useState<GitStatus | null>(null);
@@ -170,6 +173,12 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
     try {
       const s = await getStatus();
       setStatus(s);
+      // 同步状态用于决定显示 Commit 还是 Sync Changes，失败时不影响主流程
+      try {
+        setSyncStatus(await getSyncStatus());
+      } catch {
+        setSyncStatus(null);
+      }
       diffCache.current.clear();
       const currentRepo = repoRef.current;
       if (currentRepo.branch !== s.branch || currentRepo.is_detached !== s.is_detached) {
@@ -556,6 +565,23 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
     }
   }, [commitMessage, committing, loadStatus, refreshHistory]);
 
+  /** 同步到远程仓库（落后时先快进拉取，再推送本地提交） */
+  const handleSync = useCallback(async () => {
+    if (syncing) return;
+    setSyncing(true);
+    setError(null);
+    try {
+      await syncChanges();
+      await loadStatus();
+      await refreshHistory();
+      setFolderRefreshKey((k) => k + 1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSyncing(false);
+    }
+  }, [syncing, loadStatus, refreshHistory]);
+
   // ── 窗口回到顶层时自动刷新：变更文件 + 历史记录 + 文件夹目录 ─────────
   const lastAutoRefreshRef = useRef(0);
   const handleAutoRefreshRef = useRef<() => void>(() => {});
@@ -582,6 +608,8 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
 
   const repoName = repo.name || repo.path.split(/[\\\/]/).pop() || repo.path;
   const changesCount = status ? status.staged.length + status.unstaged.length : 0;
+  // 暂存区为空且本地领先远程时，主按钮切换为「同步到远程」
+  const showSync = (syncStatus?.ahead ?? 0) > 0 && (status?.staged.length ?? 0) === 0;
 
   return (
     <div className="app">
@@ -745,32 +773,52 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
 
           {/* 变更 tab：提交信息输入 + 提交按钮；其他 tab：搜索框 */}
           {activeTab === "changes" ? (
-            <div className="sidebar-commit">
-              <textarea
-                className="sidebar-commit-input"
-                placeholder="提交信息 (Commit message)"
-                value={commitMessage}
-                onChange={(e) => setCommitMessage(e.target.value)}
-                rows={2}
-                spellCheck={false}
-              />
-              <button
-                type="button"
-                className="sidebar-commit-btn"
-                onClick={handleCommit}
-                disabled={
-                  !commitMessage.trim() || committing || (status?.staged.length ?? 0) === 0
-                }
-                title={
-                  (status?.staged.length ?? 0) === 0
-                    ? "请先暂存变更后再提交"
-                    : "提交暂存区内容 (Commit)"
-                }
-              >
-                <GitCommit size={14} />
-                <span>{committing ? "提交中..." : "Commit 提交"}</span>
-              </button>
-            </div>
+            showSync ? (
+              <div className="sidebar-commit">
+                <div className="sidebar-commit-hint">
+                  {syncStatus && syncStatus.behind > 0
+                    ? `本地领先 ${syncStatus.ahead} 个提交，落后 ${syncStatus.behind} 个提交`
+                    : `本地领先远程 ${syncStatus?.ahead ?? 0} 个提交`}
+                </div>
+                <button
+                  type="button"
+                  className="sidebar-commit-btn"
+                  onClick={handleSync}
+                  disabled={syncing}
+                  title="同步到远程仓库 (Sync Changes)"
+                >
+                  <FolderSync size={14} />
+                  <span>{syncing ? "同步中..." : "Sync Changes 同步"}</span>
+                </button>
+              </div>
+            ) : (
+              <div className="sidebar-commit">
+                <textarea
+                  className="sidebar-commit-input"
+                  placeholder="提交信息 (Commit message)"
+                  value={commitMessage}
+                  onChange={(e) => setCommitMessage(e.target.value)}
+                  rows={2}
+                  spellCheck={false}
+                />
+                <button
+                  type="button"
+                  className="sidebar-commit-btn"
+                  onClick={handleCommit}
+                  disabled={
+                    !commitMessage.trim() || committing || (status?.staged.length ?? 0) === 0
+                  }
+                  title={
+                    (status?.staged.length ?? 0) === 0
+                      ? "请先暂存变更后再提交"
+                      : "提交暂存区内容 (Commit)"
+                  }
+                >
+                  <GitCommit size={14} />
+                  <span>{committing ? "提交中..." : "Commit 提交"}</span>
+                </button>
+              </div>
+            )
           ) : (
             <div className="sidebar-search">
               <Search size={14} className="sidebar-search-icon" />

@@ -8,6 +8,15 @@ pub struct RepositoryInfo {
     pub is_detached: bool,
 }
 
+/// 当前分支与上游远程的同步状态
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncStatus {
+    pub branch: String,
+    pub has_upstream: bool,
+    pub ahead: usize,
+    pub behind: usize,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FileStatus {

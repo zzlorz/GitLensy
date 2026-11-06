@@ -7,6 +7,14 @@ export interface RepositoryInfo {
   is_detached: boolean;
 }
 
+/** 当前分支与上游远程的同步状态 */
+export interface SyncStatus {
+  branch: string;
+  has_upstream: boolean;
+  ahead: number;
+  behind: number;
+}
+
 export type FileStatus =
   | "modified"
   | "added"

@@ -42,6 +42,8 @@ pub fn run() {
             commands::stage_all,
             commands::discard_all_unstaged,
             commands::commit_changes,
+            commands::get_sync_status,
+            commands::sync_changes,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application")

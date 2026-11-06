@@ -3,7 +3,7 @@ use std::path::Path;
 use tauri::State;
 
 use crate::error::{AppError, AppResult};
-use crate::models::{CommitFile, CommitInfo, DiffView, FileDiff, GitStatus, RepositoryInfo};
+use crate::models::{CommitFile, CommitInfo, DiffView, FileDiff, GitStatus, RepositoryInfo, SyncStatus};
 use crate::repository;
 use crate::{diff, git, history, status, AppState};
 
@@ -444,5 +444,86 @@ pub async fn commit_changes(state: State<'_, AppState>, message: String) -> AppR
     }
 
     git::run_git(path, &["commit", "-m", message])?;
+    Ok(())
+}
+
+/// 读取当前分支与上游远程的领先/落后提交数
+fn sync_status_for(path: &Path) -> AppResult<SyncStatus> {
+    let branch = git::run_git_string(path, &["rev-parse", "--abbrev-ref", "HEAD"])?
+        .trim()
+        .to_string();
+
+    // 没有上游分支时上游查询会失败，此时视为未关联远程
+    if git::run_git_string(path, &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])
+        .is_err()
+    {
+        return Ok(SyncStatus {
+            branch,
+            has_upstream: false,
+            ahead: 0,
+            behind: 0,
+        });
+    }
+
+    let ahead = git::run_git_string(path, &["rev-list", "--count", "@{u}..HEAD"])?
+        .trim()
+        .parse::<usize>()
+        .unwrap_or(0);
+    let behind = git::run_git_string(path, &["rev-list", "--count", "HEAD..@{u}"])?
+        .trim()
+        .parse::<usize>()
+        .unwrap_or(0);
+
+    Ok(SyncStatus {
+        branch,
+        has_upstream: true,
+        ahead,
+        behind,
+    })
+}
+
+/// 查询当前分支与远程的同步状态
+#[tauri::command]
+pub async fn get_sync_status(state: State<'_, AppState>) -> AppResult<SyncStatus> {
+    let repo_path = {
+        let repo_path = state.repo_path.lock().unwrap();
+        repo_path
+            .as_ref()
+            .ok_or(crate::error::AppError::NoRepository)?
+            .clone()
+    };
+    sync_status_for(Path::new(&repo_path))
+}
+
+/// 同步到远程仓库：落后时先快进拉取，再推送本地提交。
+#[tauri::command]
+pub async fn sync_changes(state: State<'_, AppState>) -> AppResult<()> {
+    let repo_path = {
+        let repo_path = state.repo_path.lock().unwrap();
+        repo_path
+            .as_ref()
+            .ok_or(crate::error::AppError::NoRepository)?
+            .clone()
+    };
+    let path = Path::new(&repo_path);
+
+    if has_unmerged_changes(path)? {
+        return Err(AppError::GitCommand(
+            "存在未解决的合并冲突，请手动解决后再同步".to_string(),
+        ));
+    }
+
+    let sync = sync_status_for(path)?;
+    if !sync.has_upstream {
+        return Err(AppError::GitCommand(
+            "当前分支未关联远程分支，无法同步".to_string(),
+        ));
+    }
+
+    if sync.behind > 0 {
+        // 只做快进合并，避免意外产生合并提交
+        git::run_git(path, &["pull", "--ff-only"])?;
+    }
+    git::run_git(path, &["push"])?;
     Ok(())
 }

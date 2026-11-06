@@ -476,6 +476,12 @@ input {
   flex-shrink: 0;
 }
 
+.sidebar-commit-hint {
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 0 2px;
+}
+
 .sidebar-commit-input {
   width: 100%;
   min-height: 48px;
