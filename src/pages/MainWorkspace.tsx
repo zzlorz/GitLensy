@@ -1,0 +1,619 @@
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import {
+  GitBranch, RefreshCw, FolderSync, Terminal,
+  FileCode2, AlertTriangle, Loader2, GitCommit, Diff, Search, Settings,
+} from "lucide-react";
+import FileList from "../components/FileList";
+import CommitList from "../components/CommitList";
+import CommitDetail from "../components/CommitDetail";
+import DiffViewer from "../components/DiffViewer";
+import ConfirmDialog from "../components/ConfirmDialog";
+import type { RepositoryInfo, GitStatus, ChangedFile, DiffView, FileDiff, CommitInfo, CommitFile } from "../types";
+import { getStatus, getFileDiff, saveCurrentRepo, getCommitLog, getCommitFiles, getCommitFileDiff, openTerminal, revertFile } from "../api/tauri";
+
+const PAGE_SIZE = 50;
+
+/** Adapter so we can reuse DiffViewer for commit files */
+function makeChangedFile(file: CommitFile) {
+  return {
+    path: file.path,
+    old_path: file.old_path,
+    status: file.status,
+    staged_status: undefined,
+    unstaged_status: undefined,
+    additions: file.additions,
+    deletions: file.deletions,
+    is_binary: false,
+    has_staged_changes: false,
+    has_unstaged_changes: false,
+  } as const;
+}
+
+interface Props {
+  repo: RepositoryInfo;
+  onCloseRepo: () => void;
+  onRepoUpdate: (repo: RepositoryInfo) => void;
+  onOpenSettings?: () => void;
+}
+
+type Tab = "changes" | "history";
+
+export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenSettings }: Props) {
+  const [activeTab, setActiveTab] = useState<Tab>("changes");
+  const [filter, setFilter] = useState("");
+
+  // ── Confirm dialog state ───────────────────────────────────────────────
+  interface RevertPending { file: ChangedFile; scope: "unstaged" | "staged" | "all" }
+  const [revertPending, setRevertPending] = useState<RevertPending | null>(null);
+
+  // ── Changes tab state ─────────────────────────────────────────────────
+  const [status, setStatus] = useState<GitStatus | null>(null);
+  const [selectedFile, setSelectedFile] = useState<ChangedFile | null>(null);
+  const [diffView, setDiffView] = useState<DiffView>("unstaged");
+  const [diff, setDiff] = useState<FileDiff | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [diffLoading, setDiffLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [diffError, setDiffError] = useState<string | null>(null);
+  const diffRequestId = useRef(0);
+  const diffCache = useRef<Map<string, FileDiff>>(new Map());
+  const selectedFileRef = useRef<ChangedFile | null>(null);
+  selectedFileRef.current = selectedFile;
+
+  const cacheKey = (path: string, view: DiffView) => `${view}:${path}`;
+
+  const onRepoUpdateRef = useRef(onRepoUpdate);
+  onRepoUpdateRef.current = onRepoUpdate;
+  const repoRef = useRef(repo);
+  repoRef.current = repo;
+
+  const loadStatus = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const s = await getStatus();
+      setStatus(s);
+      diffCache.current.clear();
+      const currentRepo = repoRef.current;
+      if (currentRepo.branch !== s.branch || currentRepo.is_detached !== s.is_detached) {
+        const updatedRepo = { ...currentRepo, branch: s.branch, is_detached: s.is_detached };
+        onRepoUpdateRef.current(updatedRepo);
+        saveCurrentRepo(updatedRepo);
+      }
+      // 刷新后检查当前选中文件是否还存在，不存在则清除选中状态和预览
+      setSelectedFile((prev) => {
+        if (!prev) return null;
+        const allFiles = [...s.unstaged, ...s.staged];
+        const stillExists = allFiles.some((f) => f.path === prev.path);
+        if (!stillExists) {
+          setDiff(null);
+          return null;
+        }
+        // 文件还存在，但需要更新为最新的文件对象（以刷新 diff）
+        const updated = allFiles.find((f) => f.path === prev.path) ?? null;
+        return updated;
+      });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadStatus();
+  }, [loadStatus]);
+
+  // ── 窗口获得焦点时自动刷新变更列表 ────────────────────────────────────
+  const activetabRef = useRef(activeTab);
+  activetabRef.current = activeTab;
+  const loadStatusRef = useRef(loadStatus);
+  loadStatusRef.current = loadStatus;
+
+  useEffect(() => {
+    const handleFocus = () => {
+      // 只在"变更"标签页下才自动刷新
+      if (activetabRef.current === "changes") {
+        loadStatusRef.current();
+      }
+    };
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
+  }, []);
+
+  const selectedFilePath = selectedFile?.path ?? null;
+
+  useEffect(() => {
+    const file = selectedFileRef.current;
+    if (!file || !selectedFilePath) {
+      setDiff(null);
+      return;
+    }
+
+    let view = diffView;
+    if (view === "staged" && !file.has_staged_changes) {
+      view = "unstaged";
+      setDiffView("unstaged");
+    } else if (view === "unstaged" && !file.has_unstaged_changes) {
+      view = "staged";
+      setDiffView("staged");
+    }
+
+    const requestId = ++diffRequestId.current;
+    setDiffError(null);
+
+    // 注意：这里不使用缓存，每次 selectedFile 对象引用变化（刷新后）都重新请求最新 diff
+    setDiffLoading(true);
+
+    getFileDiff(selectedFilePath, view)
+      .then((d) => {
+        if (requestId === diffRequestId.current) {
+          diffCache.current.set(cacheKey(selectedFilePath, view), d);
+          setDiff(d);
+        }
+      })
+      .catch((e) => {
+        if (requestId === diffRequestId.current) {
+          setDiffError(e instanceof Error ? e.message : String(e));
+        }
+      })
+      .finally(() => {
+        if (requestId === diffRequestId.current) {
+          setDiffLoading(false);
+        }
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedFile, diffView]);
+
+  // ── History tab state ─────────────────────────────────────────────────
+  const [commits, setCommits] = useState<CommitInfo[]>([]);
+  const [logLoading, setLogLoading] = useState(false);
+  const [logError, setLogError] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(true);
+  const offsetRef = useRef(0);
+  // 用 ref 保存分页状态，避免回调闭包拿到过期的 state（例如刷新时 hasMore 刚被重置）
+  const hasMoreRef = useRef(true);
+  const logLoadingRef = useRef(false);
+
+  const [selectedCommit, setSelectedCommit] = useState<CommitInfo | null>(null);
+  const [commitFiles, setCommitFiles] = useState<CommitFile[]>([]);
+  const [filesLoading, setFilesLoading] = useState(false);
+  const [filesError, setFilesError] = useState<string | null>(null);
+
+  const [selectedCommitFile, setSelectedCommitFile] = useState<CommitFile | null>(null);
+  const [commitDiff, setCommitDiff] = useState<FileDiff | null>(null);
+  const [commitDiffLoading, setCommitDiffLoading] = useState(false);
+  const [commitDiffError, setCommitDiffError] = useState<string | null>(null);
+
+  const commitDiffRequestId = useRef(0);
+  const commitDiffCache = useRef<Map<string, FileDiff>>(new Map());
+
+  const loadMoreCommits = useCallback(async () => {
+    if (logLoadingRef.current || !hasMoreRef.current) return;
+    logLoadingRef.current = true;
+    setLogLoading(true);
+    setLogError(null);
+    try {
+      const page = await getCommitLog(PAGE_SIZE, offsetRef.current);
+      if (page.length < PAGE_SIZE) {
+        hasMoreRef.current = false;
+        setHasMore(false);
+      }
+      setCommits((prev) => [...prev, ...page]);
+      offsetRef.current += page.length;
+    } catch (e) {
+      setLogError(e instanceof Error ? e.message : String(e));
+      hasMoreRef.current = false;
+      setHasMore(false);
+    } finally {
+      logLoadingRef.current = false;
+      setLogLoading(false);
+    }
+  }, []);
+
+  // Load commits when user switches to History tab for the first time
+  useEffect(() => {
+    if (activeTab === "history" && commits.length === 0) {
+      loadMoreCommits();
+    }
+  }, [activeTab, commits.length, loadMoreCommits]);
+
+  const handleSelectCommit = useCallback(async (commit: CommitInfo) => {
+    if (selectedCommit?.hash === commit.hash) return;
+    setSelectedCommit(commit);
+    setSelectedCommitFile(null);
+    setCommitDiff(null);
+    setCommitDiffError(null);
+    setFilesLoading(true);
+    setFilesError(null);
+    try {
+      const files = await getCommitFiles(commit.hash);
+      setCommitFiles(files);
+    } catch (e) {
+      setFilesError(e instanceof Error ? e.message : String(e));
+      setCommitFiles([]);
+    } finally {
+      setFilesLoading(false);
+    }
+  }, [selectedCommit]);
+
+  const handleSelectCommitFile = useCallback(async (file: CommitFile) => {
+    if (!selectedCommit) return;
+    setSelectedCommitFile(file);
+    setCommitDiffError(null);
+
+    const cKey = `${selectedCommit.hash}:${file.path}`;
+    const cached = commitDiffCache.current.get(cKey);
+    if (cached) {
+      setCommitDiff(cached);
+      return;
+    }
+
+    const requestId = ++commitDiffRequestId.current;
+    setCommitDiff(null);
+    setCommitDiffLoading(true);
+    try {
+      const d = await getCommitFileDiff(selectedCommit.hash, file.path, file.old_path);
+      if (requestId === commitDiffRequestId.current) {
+        commitDiffCache.current.set(cKey, d);
+        setCommitDiff(d);
+      }
+    } catch (e) {
+      if (requestId === commitDiffRequestId.current) {
+        setCommitDiffError(e instanceof Error ? e.message : String(e));
+      }
+    } finally {
+      if (requestId === commitDiffRequestId.current) {
+        setCommitDiffLoading(false);
+      }
+    }
+  }, [selectedCommit]);
+
+  // Client-side filter for commit list
+  const filteredCommits = useMemo(() => {
+    if (!filter.trim()) return commits;
+    const q = filter.toLowerCase();
+    return commits.filter(
+      (c) =>
+        c.subject.toLowerCase().includes(q) ||
+        c.short_hash.toLowerCase().includes(q) ||
+        c.author_name.toLowerCase().includes(q)
+    );
+  }, [commits, filter]);
+
+  const handleOpenTerminal = useCallback(async () => {
+    try {
+      await openTerminal();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
+  /** 第一步：右键菜单点击撤销 → 仅弹出确认框，不执行任何 git 操作 */
+  const handleRevert = useCallback(
+    (file: ChangedFile, scope: "unstaged" | "staged" | "all") => {
+      setRevertPending({ file, scope });
+    },
+    [],
+  );
+
+  /** 第二步：用户在确认框点击"确认" → 执行实际的 git 撤销 */
+  const handleRevertConfirm = useCallback(async () => {
+    if (!revertPending) return;
+    const { file, scope } = revertPending;
+    setRevertPending(null);
+    try {
+      await revertFile(file.path, scope);
+      // 如果撤销的是当前选中的文件，先清掉，避免 Diff 面板显示陈旧内容
+      if (selectedFilePath === file.path) {
+        setSelectedFile(null);
+        setDiff(null);
+      }
+      await loadStatus();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [revertPending, loadStatus, selectedFilePath]);
+
+  const handleRefresh = useCallback(() => {
+    if (activeTab === "changes") {
+      loadStatus();
+    } else {
+      // Reload history
+      offsetRef.current = 0;
+      hasMoreRef.current = true;
+      setCommits([]);
+      setHasMore(true);
+      setLogError(null);
+      commitDiffCache.current.clear();
+      setSelectedCommit(null);
+      setSelectedCommitFile(null);
+      setCommitDiff(null);
+      loadMoreCommits();
+    }
+  }, [activeTab, loadStatus, loadMoreCommits]);
+
+  const handleSwitchRepo = useCallback(() => {
+    onCloseRepo();
+  }, [onCloseRepo]);
+
+  const repoName = repo.name || repo.path.split(/[\\\/]/).pop() || repo.path;
+  const changesCount = status ? status.staged.length + status.unstaged.length : 0;
+
+  return (
+    <div className="app">
+      {/* ── Toolbar (clean, global actions only) ──────────────────── */}
+      <div className="toolbar">
+        <div className="toolbar-repo-badge" title={repo.path}>
+          <img src="/app-icon.png" alt="GitLensy" style={{ width: 16, height: 16, objectFit: "contain", flexShrink: 0 }} />
+          <span className="toolbar-repo-name">{repoName}</span>
+        </div>
+
+        <div
+          className={`toolbar-branch-badge ${repo.is_detached ? "detached" : ""}`}
+          title={repo.is_detached ? "Detached HEAD" : `分支: ${repo.branch}`}
+        >
+          <GitBranch size={13} style={{ flexShrink: 0 }} />
+          <span>{repo.is_detached ? "Detached HEAD" : repo.branch}</span>
+        </div>
+
+        <div className="toolbar-spacer" />
+
+        <div className="toolbar-actions">
+          <button
+            className="toolbar-btn"
+            onClick={handleRefresh}
+            disabled={activeTab === "changes" ? loading : logLoading}
+            title={activeTab === "changes" ? "刷新仓库变更状态" : "刷新提交记录"}
+          >
+            <RefreshCw size={14} className={(activeTab === "changes" ? loading : logLoading) ? "spin" : ""} />
+            <span>刷新</span>
+          </button>
+          <button
+            className="toolbar-btn"
+            onClick={handleOpenTerminal}
+            title="在当前仓库根目录打开 PowerShell"
+          >
+            <Terminal size={14} />
+            <span>终端</span>
+          </button>
+          <button
+            className="toolbar-btn"
+            onClick={handleSwitchRepo}
+            title="切换或打开其他仓库"
+          >
+            <FolderSync size={14} />
+            <span>切换仓库</span>
+          </button>
+          {onOpenSettings && (
+            <button
+              className="toolbar-btn"
+              onClick={onOpenSettings}
+              title="应用设置 (修改主题等)"
+            >
+              <Settings size={14} />
+              <span>设置</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ── Main Layout ─────────────────────────────────────────── */}
+      <div className="main-content">
+        {/* ── Sidebar (Column 1) ─────────────────────────────────── */}
+        <div className="sidebar">
+          {/* Top of Sidebar: Mode B (Tabs on top, Search box immediately below) */}
+          <div className="sidebar-tabs-container">
+            <div className="sidebar-tabs" role="tablist">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === "changes"}
+                className={`sidebar-tab ${activeTab === "changes" ? "active" : ""}`}
+                onClick={() => {
+                  setActiveTab("changes");
+                  setFilter("");
+                }}
+              >
+                <Diff size={14} />
+                <span>变更</span>
+                {changesCount > 0 && (
+                  <span className="sidebar-tab-badge">{changesCount}</span>
+                )}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === "history"}
+                className={`sidebar-tab ${activeTab === "history" ? "active" : ""}`}
+                onClick={() => {
+                  setActiveTab("history");
+                  setFilter("");
+                }}
+              >
+                <GitCommit size={14} />
+                <span>历史</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Search box directly underneath the tabs */}
+          <div className="sidebar-search">
+            <Search size={14} className="sidebar-search-icon" />
+            <input
+              type="text"
+              className="sidebar-search-input"
+              placeholder={activeTab === "changes" ? "过滤变更文件..." : "搜索提交记录、作者、哈希..."}
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+            />
+          </div>
+
+          {/* Sidebar Body */}
+          {activeTab === "changes" && (
+            <>
+              {error && <div className="error-message">{error}</div>}
+              {loading && !status && (
+                <div className="loading" style={{ padding: 24 }}>
+                  <div className="loading-spinner" />
+                  <span>正在获取仓库状态...</span>
+                </div>
+              )}
+              {status && (
+                <FileList
+                  status={status}
+                  selectedPath={selectedFile?.path || null}
+                  onSelect={setSelectedFile}
+                  filter={filter}
+                  onFilterChange={setFilter}
+                  onRevert={handleRevert}
+                />
+              )}
+            </>
+          )}
+
+          {activeTab === "history" && (
+            <>
+              {logError && <div className="error-message">{logError}</div>}
+              <CommitList
+                commits={filteredCommits}
+                selectedHash={selectedCommit?.hash ?? null}
+                loading={logLoading}
+                hasMore={hasMore && !filter.trim()}
+                onSelect={handleSelectCommit}
+                onLoadMore={loadMoreCommits}
+              />
+            </>
+          )}
+        </div>
+
+        {/* ── Content Area: Changes Mode vs History Mode ─────────── */}
+        {activeTab === "changes" && (
+          <div className="diff-viewer">
+            {!selectedFile && (
+              <div className="empty-state">
+                <div className="empty-state-icon-wrapper">
+                  <FileCode2 size={32} strokeWidth={1.5} />
+                </div>
+                <div className="empty-state-text">选择一个变更文件以查看 Diff</div>
+                <div className="empty-state-sub">支持工作区与暂存区对比</div>
+              </div>
+            )}
+
+            {selectedFile && diffLoading && (
+              <div className="diff-loading">
+                <Loader2 size={13} className="spin" />
+                <span>正在读取 Diff...</span>
+              </div>
+            )}
+
+            {selectedFile && !diffLoading && diffError && (
+              <div className="empty-state">
+                <div className="empty-state-icon-wrapper" style={{ color: "var(--error-color)" }}>
+                  <AlertTriangle size={32} strokeWidth={1.5} />
+                </div>
+                <div className="empty-state-text">Diff 加载失败</div>
+                <div style={{ fontSize: 12, color: "var(--error-color)", maxWidth: 400, textAlign: "center" }}>
+                  {diffError}
+                </div>
+              </div>
+            )}
+
+            {selectedFile && !diffError && diff && (
+              <DiffViewer
+                diff={diff}
+                file={selectedFile}
+                view={diffView}
+                onViewChange={setDiffView}
+              />
+            )}
+          </div>
+        )}
+
+        {activeTab === "history" && (
+          <div className="history-main-content">
+            {/* Column 2 in History Mode: Commit details & changed files */}
+            <div className="history-detail-panel">
+              {!selectedCommit ? (
+                <div className="empty-state">
+                  <div className="empty-state-icon-wrapper">
+                    <GitCommit size={32} strokeWidth={1.5} />
+                  </div>
+                  <div className="empty-state-text">选择一条提交记录</div>
+                  <div className="empty-state-sub">查看该次提交的变更文件与信息</div>
+                </div>
+              ) : (
+                <CommitDetail
+                  commit={selectedCommit}
+                  files={commitFiles}
+                  filesLoading={filesLoading}
+                  filesError={filesError}
+                  selectedFilePath={selectedCommitFile?.path ?? null}
+                  diff={commitDiff}
+                  diffLoading={commitDiffLoading}
+                  diffError={commitDiffError}
+                  onSelectFile={handleSelectCommitFile}
+                />
+              )}
+            </div>
+
+            {/* Column 3 in History Mode: Diff viewer */}
+            <div className="history-diff-panel">
+              {!selectedCommitFile ? (
+                <div className="empty-state">
+                  <div className="empty-state-icon-wrapper">
+                    <FileCode2 size={32} strokeWidth={1.5} />
+                  </div>
+                  <div className="empty-state-text">选择一个文件查看 Diff</div>
+                  <div className="empty-state-sub">查看该文件在本次提交中的改动</div>
+                </div>
+              ) : (
+                <>
+                  {commitDiffLoading && (
+                    <div className="diff-loading">
+                      <Loader2 size={13} className="spin" />
+                      <span>正在读取 Diff...</span>
+                    </div>
+                  )}
+                  {!commitDiffLoading && commitDiff && (
+                    <DiffViewer
+                      diff={commitDiff}
+                      file={makeChangedFile(selectedCommitFile) as any}
+                      view="unstaged"
+                      onViewChange={() => {}}
+                      contextLabel="本次提交的改动"
+                    />
+                  )}
+                  {!commitDiffLoading && commitDiffError && (
+                    <div className="empty-state" style={{ padding: 32 }}>
+                      <div style={{ color: "var(--error-color)", fontSize: 13 }}>{commitDiffError}</div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Confirm Dialog ───────────────────────────────────────── */}
+      {revertPending && (() => {
+        const { file, scope } = revertPending;
+        const scopeLabel =
+          scope === "unstaged" ? "工作区修改"
+          : scope === "staged" ? "暂存区修改"
+          : "所有修改（暂存区 + 工作区）";
+        return (
+          <ConfirmDialog
+            title="确认撤销"
+            message={`确定要撤销以下文件的${scopeLabel}吗？\n\n${file.path}\n\n此操作不可恢复。`}
+            confirmText="撤销"
+            cancelText="取消"
+            onConfirm={handleRevertConfirm}
+            onCancel={() => setRevertPending(null)}
+          />
+        );
+      })()}
+    </div>
+  );
+}

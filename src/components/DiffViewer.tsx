@@ -1,0 +1,180 @@
+import { useState } from "react";
+import {
+  FileCode2,
+  ArrowRight,
+  Copy,
+  Check,
+  CheckCircle2,
+  AlertTriangle,
+  Binary,
+  Hash,
+} from "lucide-react";
+import type { FileDiff, ChangedFile, DiffView } from "../types";
+
+interface Props {
+  diff: FileDiff;
+  file: ChangedFile;
+  view: DiffView;
+  onViewChange: (view: DiffView) => void;
+  /** 覆盖右上角的 diff 来源说明（例如历史视图里显示「本次提交」） */
+  contextLabel?: string;
+}
+
+function statusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    modified: "已修改 (Modified)",
+    added: "新添加 (Added)",
+    deleted: "已删除 (Deleted)",
+    renamed: "重命名 (Renamed)",
+    copied: "已复制 (Copied)",
+    conflict: "存在冲突 (Conflict)",
+    untracked: "未跟踪 (Untracked)",
+  };
+  return labels[status] || status;
+}
+
+export default function DiffViewer({ diff, file, view, onViewChange, contextLabel }: Props) {
+  const [copied, setCopied] = useState(false);
+  const displayPath = diff.new_path !== "/dev/null" ? diff.new_path : diff.old_path;
+  const displayStatus = file.staged_status || file.unstaged_status || file.status || "modified";
+  const hasBoth = file.has_staged_changes && file.has_unstaged_changes;
+
+  const handleCopyPath = () => {
+    navigator.clipboard.writeText(displayPath);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  return (
+    <>
+      <div className="diff-header">
+        <div className="diff-header-top">
+          <div className="diff-path" title={displayPath}>
+            <FileCode2 size={16} className="diff-path-icon" />
+            {diff.old_path !== diff.new_path &&
+              diff.old_path !== "/dev/null" &&
+              diff.new_path !== "/dev/null" && (
+                <>
+                  <span style={{ color: "var(--text-muted)" }}>{diff.old_path}</span>
+                  <ArrowRight size={13} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+                </>
+              )}
+            <span>{displayPath}</span>
+            <button
+              className="diff-copy-btn"
+              onClick={handleCopyPath}
+              title={copied ? "已复制！" : "复制文件路径"}
+            >
+              {copied ? <Check size={13} style={{ color: "var(--added-color)" }} /> : <Copy size={13} />}
+            </button>
+          </div>
+
+          {hasBoth && (
+            <div className="diff-view-toggle">
+              <button
+                className={`diff-view-btn ${view === "unstaged" ? "active" : ""}`}
+                onClick={() => onViewChange("unstaged")}
+              >
+                工作区 (Working)
+              </button>
+              <button
+                className={`diff-view-btn ${view === "staged" ? "active" : ""}`}
+                onClick={() => onViewChange("staged")}
+              >
+                暂存区 (Index)
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="diff-info">
+          <div className="diff-status-pill">
+            <span
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: "50%",
+                backgroundColor: `var(--${displayStatus}-color, var(--text-secondary))`,
+              }}
+            />
+            <span>{statusLabel(displayStatus)}</span>
+          </div>
+
+          {!diff.is_binary && (
+            <>
+              {diff.additions > 0 && (
+                <span className="diff-stat-pill add">+{diff.additions}</span>
+              )}
+              {diff.deletions > 0 && (
+                <span className="diff-stat-pill del">-{diff.deletions}</span>
+              )}
+            </>
+          )}
+
+          {!hasBoth && (
+            <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text-muted)" }}>
+              {contextLabel ?? (view === "staged" ? "暂存区变更 (Staged)" : "工作区未暂存 (Unstaged)")}
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="diff-content">
+        {diff.is_binary && (
+          <div className="binary-notice">
+            <Binary size={36} strokeWidth={1.5} />
+            <div>二进制文件，无法展示文本 Diff</div>
+          </div>
+        )}
+
+        {!diff.is_binary && diff.hunks.length === 0 && !diff.error && (
+          <div className="empty-state" style={{ height: "auto", padding: 48 }}>
+            <div className="empty-state-icon-wrapper" style={{ color: "var(--added-color)" }}>
+              <CheckCircle2 size={32} strokeWidth={1.5} />
+            </div>
+            <div className="empty-state-text">无内容变动</div>
+            <div className="empty-state-sub">文件内容与基准版本一致</div>
+          </div>
+        )}
+
+        {diff.error && (
+          <div className="empty-state" style={{ height: "auto", padding: 48 }}>
+            <div className="empty-state-icon-wrapper" style={{ color: "var(--error-color)" }}>
+              <AlertTriangle size={32} strokeWidth={1.5} />
+            </div>
+            <div className="empty-state-text">获取 Diff 失败</div>
+            <div style={{ fontSize: 12, color: "var(--error-color)", maxWidth: 440, textAlign: "center", marginTop: 4 }}>
+              {diff.error}
+            </div>
+          </div>
+        )}
+
+        {!diff.is_binary && (
+          <div className="diff-table">
+            {diff.hunks.map((hunk, hunkIndex) => (
+              <div key={hunkIndex} className="diff-hunk">
+                <div className="diff-hunk-header">
+                  <Hash size={12} style={{ color: "var(--text-muted)" }} />
+                  <span>
+                    @@ -{hunk.old_start},{hunk.old_lines} +{hunk.new_start},{hunk.new_lines} @@
+                  </span>
+                </div>
+                {hunk.lines.map((line, lineIndex) => (
+                  <div key={lineIndex} className={`diff-line ${line.type}`}>
+                    <span className="diff-line-num">
+                      {line.type === "add" ? "" : line.old_line_number > 0 ? line.old_line_number : ""}
+                    </span>
+                    <span className="diff-line-num">
+                      {line.type === "remove" ? "" : line.new_line_number > 0 ? line.new_line_number : ""}
+                    </span>
+                    <span className="diff-line-content">{line.content || " "}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}

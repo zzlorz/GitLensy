@@ -1,0 +1,1 @@
+--pretty=format:%H\x1e%h\x00
