@@ -1,15 +1,18 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
-  GitBranch, RefreshCw, FolderSync, Terminal,
-  FileCode2, AlertTriangle, Loader2, GitCommit, Diff, Search, Settings,
+  GitBranch, RefreshCw, FolderSync, Terminal, ChevronDown,
+  FileCode2, AlertTriangle, Loader2, GitCommit, Diff, Search, Settings, FolderOpen, X,
 } from "lucide-react";
 import FileList from "../components/FileList";
 import CommitList from "../components/CommitList";
 import CommitDetail from "../components/CommitDetail";
 import DiffViewer from "../components/DiffViewer";
 import ConfirmDialog from "../components/ConfirmDialog";
-import type { RepositoryInfo, GitStatus, ChangedFile, DiffView, FileDiff, CommitInfo, CommitFile } from "../types";
-import { getStatus, getFileDiff, saveCurrentRepo, getCommitLog, getCommitFiles, getCommitFileDiff, openTerminal, revertFile } from "../api/tauri";
+import FolderTree from "../components/FolderTree";
+import FilePreview from "../components/FilePreview";
+import RepoAvatar from "../components/RepoAvatar";
+import type { RepositoryInfo, GitStatus, ChangedFile, DiffView, FileDiff, CommitInfo, CommitFile, RecentRepo } from "../types";
+import { getStatus, getFileDiff, saveCurrentRepo, getCommitLog, getCommitFiles, getCommitFileDiff, openTerminal, revertFile, getRecentRepos, openRepository, removeRecentRepo } from "../api/tauri";
 
 const PAGE_SIZE = 50;
 
@@ -36,11 +39,59 @@ interface Props {
   onOpenSettings?: () => void;
 }
 
-type Tab = "changes" | "history";
+type Tab = "changes" | "history" | "folders";
 
 export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenSettings }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>("changes");
   const [filter, setFilter] = useState("");
+
+  // ── Repo switcher dropdown ─────────────────────────────────────────────
+  const [repoMenuOpen, setRepoMenuOpen] = useState(false);
+  const [recentRepos, setRecentRepos] = useState<RecentRepo[]>(getRecentRepos());
+  const repoMenuRef = useRef<HTMLDivElement>(null);
+
+  // 点击外部关闭下拉菜单
+  useEffect(() => {
+    if (!repoMenuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (repoMenuRef.current && !repoMenuRef.current.contains(e.target as Node)) {
+        setRepoMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [repoMenuOpen]);
+
+  const refreshRecentRepos = useCallback(() => {
+    setRecentRepos(getRecentRepos());
+  }, []);
+
+  const handleOpenRecentRepo = useCallback(async (path: string) => {
+    setRepoMenuOpen(false);
+    try {
+      const info = await openRepository(path);
+      saveCurrentRepo(info);
+      onRepoUpdate(info);
+      refreshRecentRepos();
+    } catch (e) {
+      // open_repository 失败时回到欢迎页让用户重新选择
+      onCloseRepo();
+    }
+  }, [onRepoUpdate, onCloseRepo, refreshRecentRepos]);
+
+  const handleRemoveRecent = useCallback((e: React.MouseEvent, path: string) => {
+    e.stopPropagation();
+    removeRecentRepo(path);
+    refreshRecentRepos();
+  }, [refreshRecentRepos]);
+
+  const handleOpenOtherRepo = useCallback(() => {
+    setRepoMenuOpen(false);
+    onCloseRepo();
+  }, [onCloseRepo]);
+
+  // ── Folders tab state ─────────────────────────────────────────────────
+  const [selectedFolderFile, setSelectedFolderFile] = useState<{ fullPath: string; relPath: string } | null>(null);
 
   // ── Confirm dialog state ───────────────────────────────────────────────
   interface RevertPending { file: ChangedFile; scope: "unstaged" | "staged" | "all" }
@@ -66,6 +117,41 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
   onRepoUpdateRef.current = onRepoUpdate;
   const repoRef = useRef(repo);
   repoRef.current = repo;
+
+  // ── 仓库切换时重置所有状态并重新加载 ────────────────────────────────
+  useEffect(() => {
+    // 重置变更列表状态
+    setStatus(null);
+    setSelectedFile(null);
+    setDiff(null);
+    setDiffLoading(false);
+    setError(null);
+    diffCache.current.clear();
+
+    // 重置历史记录状态
+    setCommits([]);
+    setHasMore(true);
+    setLogError(null);
+    hasMoreRef.current = true;
+    offsetRef.current = 0;
+    setSelectedCommit(null);
+    setCommitFiles([]);
+    setSelectedCommitFile(null);
+    setCommitDiff(null);
+    commitDiffCache.current.clear();
+
+    // 重置文件夹 tab 状态
+    setSelectedFolderFile(null);
+
+    // 重新加载变更列表
+    loadStatus();
+
+    // 如果当前在历史 tab，重新加载提交记录
+    if (activeTab === "history") {
+      loadMoreCommits();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repo.path]);
 
   const loadStatus = useCallback(async () => {
     setLoading(true);
@@ -122,6 +208,13 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
   }, []);
 
   const selectedFilePath = selectedFile?.path ?? null;
+
+  /** 文件夹 tab 当前预览文件对应的 Git 变更信息（用于标注变更行） */
+  const selectedFolderChange = useMemo(() => {
+    if (!selectedFolderFile || !status) return null;
+    const path = selectedFolderFile.relPath;
+    return [...status.staged, ...status.unstaged].find((f) => f.path === path) ?? null;
+  }, [selectedFolderFile, status]);
 
   useEffect(() => {
     const file = selectedFileRef.current;
@@ -289,6 +382,11 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
     }
   }, []);
 
+  /** 文件夹 tab 中点击文件：直接在右侧独立预览（不走 Git Diff） */
+  const handleFolderFileSelect = useCallback((fullPath: string, relPath: string) => {
+    setSelectedFolderFile({ fullPath, relPath });
+  }, []);
+
   /** 第一步：右键菜单点击撤销 → 仅弹出确认框，不执行任何 git 操作 */
   const handleRevert = useCallback(
     (file: ChangedFile, scope: "unstaged" | "staged" | "all") => {
@@ -344,9 +442,59 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
     <div className="app">
       {/* ── Toolbar (clean, global actions only) ──────────────────── */}
       <div className="toolbar">
-        <div className="toolbar-repo-badge" title={repo.path}>
-          <img src="/app-icon.png" alt="GitLensy" style={{ width: 16, height: 16, objectFit: "contain", flexShrink: 0 }} />
-          <span className="toolbar-repo-name">{repoName}</span>
+        {/* 仓库切换器：点击展开最近仓库列表 */}
+        <div className="repo-switcher" ref={repoMenuRef}>
+          <button
+            className={`toolbar-repo-badge ${repoMenuOpen ? "open" : ""}`}
+            onClick={() => setRepoMenuOpen((v) => !v)}
+            title={repo.path}
+          >
+            <RepoAvatar repoName={repoName} repoPath={repo.path} size={16} />
+            <span className="toolbar-repo-name">{repoName}</span>
+            <ChevronDown
+              size={13}
+              style={{ flexShrink: 0, opacity: 0.6, transition: "transform 0.15s", transform: repoMenuOpen ? "rotate(180deg)" : "none" }}
+            />
+          </button>
+
+          {repoMenuOpen && (
+            <div className="repo-switcher-dropdown">
+              <div className="repo-switcher-section-title">最近打开</div>
+              {recentRepos.length === 0 ? (
+                <div className="repo-switcher-empty">暂无最近仓库</div>
+              ) : (
+                recentRepos.map((r) => (
+                  <div
+                    key={r.path}
+                    className={`repo-switcher-item ${r.path === repo.path ? "current" : ""}`}
+                    onClick={() => r.path !== repo.path && handleOpenRecentRepo(r.path)}
+                    title={r.path}
+                  >
+                    <RepoAvatar repoName={r.name} repoPath={r.path} size={18} />
+                    <div className="repo-switcher-item-info">
+                      <div className="repo-switcher-item-name">{r.name}</div>
+                      <div className="repo-switcher-item-path">{r.path}</div>
+                    </div>
+                    {r.path === repo.path && (
+                      <span className="repo-switcher-current-tag">当前</span>
+                    )}
+                    <button
+                      className="repo-switcher-remove"
+                      onClick={(e) => handleRemoveRecent(e, r.path)}
+                      title="从最近列表移除"
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                ))
+              )}
+              <div className="repo-switcher-divider" />
+              <button className="repo-switcher-other" onClick={handleOpenOtherRepo}>
+                <FolderOpen size={14} />
+                <span>打开其他仓库...</span>
+              </button>
+            </div>
+          )}
         </div>
 
         <div
@@ -434,6 +582,19 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                 <GitCommit size={14} />
                 <span>历史</span>
               </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === "folders"}
+                className={`sidebar-tab ${activeTab === "folders" ? "active" : ""}`}
+                onClick={() => {
+                  setActiveTab("folders");
+                  setFilter("");
+                }}
+              >
+                <FolderOpen size={14} />
+                <span>文件夹</span>
+              </button>
             </div>
           </div>
 
@@ -443,7 +604,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
             <input
               type="text"
               className="sidebar-search-input"
-              placeholder={activeTab === "changes" ? "过滤变更文件..." : "搜索提交记录、作者、哈希..."}
+              placeholder={activeTab === "changes" ? "过滤变更文件..." : activeTab === "folders" ? "搜索文件或目录..." : "搜索提交记录、作者、哈希..."}
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
             />
@@ -484,6 +645,16 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                 onLoadMore={loadMoreCommits}
               />
             </>
+          )}
+
+          {activeTab === "folders" && (
+            <FolderTree
+              repoPath={repo.path}
+              filter={filter}
+              status={status}
+              onSelectFile={handleFolderFileSelect}
+              selectedPath={selectedFolderFile?.fullPath ?? null}
+            />
           )}
         </div>
 
@@ -592,6 +763,26 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                 </>
               )}
             </div>
+          </div>
+        )}
+
+        {activeTab === "folders" && (
+          <div className="diff-viewer">
+            {!selectedFolderFile ? (
+              <div className="empty-state">
+                <div className="empty-state-icon-wrapper">
+                  <FolderOpen size={32} strokeWidth={1.5} />
+                </div>
+                <div className="empty-state-text">浏览目录结构</div>
+                <div className="empty-state-sub">左侧文件夹树支持展开折叠、搜索过滤，点击文件即可预览</div>
+              </div>
+            ) : (
+              <FilePreview
+                fullPath={selectedFolderFile.fullPath}
+                relPath={selectedFolderFile.relPath}
+                change={selectedFolderChange}
+              />
+            )}
           </div>
         )}
       </div>
