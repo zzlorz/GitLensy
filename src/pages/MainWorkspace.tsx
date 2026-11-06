@@ -7,12 +7,13 @@ import FileList from "../components/FileList";
 import CommitList from "../components/CommitList";
 import CommitDetail from "../components/CommitDetail";
 import DiffViewer from "../components/DiffViewer";
+import AllChangesView from "../components/AllChangesView";
 import ConfirmDialog from "../components/ConfirmDialog";
 import FolderTree from "../components/FolderTree";
 import FilePreview from "../components/FilePreview";
 import RepoAvatar from "../components/RepoAvatar";
 import type { RepositoryInfo, GitStatus, ChangedFile, DiffView, FileDiff, CommitInfo, CommitFile, RecentRepo } from "../types";
-import { getStatus, getFileDiff, saveCurrentRepo, getCommitLog, getCommitFiles, getCommitFileDiff, openTerminal, revertFile, getRecentRepos, openRepository, removeRecentRepo } from "../api/tauri";
+import { getStatus, getFileDiff, saveCurrentRepo, getCommitLog, getCommitFiles, getCommitFileDiff, openTerminal, revertFile, stageFile, stageAll, discardAllUnstaged, commitChanges, getRecentRepos, openRepository, removeRecentRepo } from "../api/tauri";
 
 const PAGE_SIZE = 50;
 
@@ -92,14 +93,23 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
 
   // ── Folders tab state ─────────────────────────────────────────────────
   const [selectedFolderFile, setSelectedFolderFile] = useState<{ fullPath: string; relPath: string } | null>(null);
+  /** 递增触发文件夹树重新扫描 */
+  const [folderRefreshKey, setFolderRefreshKey] = useState(0);
 
   // ── Confirm dialog state ───────────────────────────────────────────────
   interface RevertPending { file: ChangedFile; scope: "unstaged" | "staged" | "all" }
   const [revertPending, setRevertPending] = useState<RevertPending | null>(null);
+  /** 放弃所有工作区变更的确认框 */
+  const [confirmDiscardAll, setConfirmDiscardAll] = useState(false);
+  /** 变更 tab 的提交信息与提交状态 */
+  const [commitMessage, setCommitMessage] = useState("");
+  const [committing, setCommitting] = useState(false);
 
   // ── Changes tab state ─────────────────────────────────────────────────
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [selectedFile, setSelectedFile] = useState<ChangedFile | null>(null);
+  /** 右侧内容区模式：diff = 单文件对比，file = 文件内容预览，all = 所有变更文件连续对比 */
+  const [rightPanelMode, setRightPanelMode] = useState<"diff" | "file" | "all">("diff");
   const [diffView, setDiffView] = useState<DiffView>("unstaged");
   const [diff, setDiff] = useState<FileDiff | null>(null);
   const [loading, setLoading] = useState(false);
@@ -123,6 +133,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
     // 重置变更列表状态
     setStatus(null);
     setSelectedFile(null);
+    setRightPanelMode("diff");
     setDiff(null);
     setDiffLoading(false);
     setError(null);
@@ -191,21 +202,10 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
   }, [loadStatus]);
 
   // ── 窗口获得焦点时自动刷新变更列表 ────────────────────────────────────
-  const activetabRef = useRef(activeTab);
-  activetabRef.current = activeTab;
   const loadStatusRef = useRef(loadStatus);
   loadStatusRef.current = loadStatus;
 
-  useEffect(() => {
-    const handleFocus = () => {
-      // 只在"变更"标签页下才自动刷新
-      if (activetabRef.current === "changes") {
-        loadStatusRef.current();
-      }
-    };
-    window.addEventListener("focus", handleFocus);
-    return () => window.removeEventListener("focus", handleFocus);
-  }, []);
+  // 焦点自动刷新统一放在历史记录相关回调之后定义（见下方 handleAutoRefresh）
 
   const selectedFilePath = selectedFile?.path ?? null;
 
@@ -413,9 +413,80 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
     }
   }, [revertPending, loadStatus, selectedFilePath]);
 
+  /** 暂存单个文件（悬停加号） */
+  const handleStage = useCallback(async (file: ChangedFile) => {
+    try {
+      await stageFile(file.path);
+      await loadStatus();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [loadStatus]);
+
+  /** 取消暂存（保留工作区修改） */
+  const handleUnstage = useCallback(async (file: ChangedFile) => {
+    try {
+      await revertFile(file.path, "staged");
+      await loadStatus();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [loadStatus]);
+
+  /** 暂存所有变更（git add -A） */
+  const handleStageAll = useCallback(async () => {
+    try {
+      await stageAll();
+      await loadStatus();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [loadStatus]);
+
+  /** 确认放弃所有工作区变更 */
+  const handleDiscardAllConfirm = useCallback(async () => {
+    setConfirmDiscardAll(false);
+    try {
+      await discardAllUnstaged();
+      setSelectedFile(null);
+      setDiff(null);
+      setRightPanelMode("diff");
+      await loadStatus();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [loadStatus]);
+
+  /** 点击文件条目：右侧展示变更对比 */
+  const handleSelectChangedFile = useCallback((file: ChangedFile) => {
+    setSelectedFile(file);
+    setRightPanelMode("diff");
+  }, []);
+
+  /** 悬停"打开文件"：右侧按文件夹目录的预览方式展示文件内容 */
+  const handlePreviewChangedFile = useCallback((file: ChangedFile) => {
+    setSelectedFile(file);
+    setRightPanelMode("file");
+  }, []);
+
+  /** 预览所有变更文件：按文件顺序从上到下连续对比 */
+  const handleOpenAllChanges = useCallback(() => {
+    setRightPanelMode("all");
+  }, []);
+
+  const selectedFileFullPath = useMemo(() => {
+    if (!selectedFile) return "";
+    const base = repo.path.replace(/\\/g, "/").replace(/\/+$/, "");
+    return `${base}/${selectedFile.path.replace(/\\/g, "/")}`;
+  }, [repo.path, selectedFile]);
+
   const handleRefresh = useCallback(() => {
     if (activeTab === "changes") {
       loadStatus();
+    } else if (activeTab === "folders") {
+      // 文件夹页：同时刷新变更标注和目录树
+      loadStatus();
+      setFolderRefreshKey((k) => k + 1);
     } else {
       // Reload history
       offsetRef.current = 0;
@@ -430,6 +501,80 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
       loadMoreCommits();
     }
   }, [activeTab, loadStatus, loadMoreCommits]);
+
+  /** 已加载的提交数量（用 ref 避免焦点回调拿到过期闭包） */
+  const commitsLenRef = useRef(0);
+  commitsLenRef.current = commits.length;
+
+  /** 刷新已加载范围内的提交记录，保持分页深度与当前选中项 */
+  const refreshHistory = useCallback(async () => {
+    if (logLoadingRef.current) return;
+    const loaded = commitsLenRef.current;
+    // 从未加载过历史记录时不做额外请求，等用户切到历史页再加载
+    if (loaded === 0) return;
+
+    const limit = Math.max(loaded, PAGE_SIZE);
+    logLoadingRef.current = true;
+    setLogLoading(true);
+    setLogError(null);
+    try {
+      const page = await getCommitLog(limit, 0);
+      offsetRef.current = page.length;
+      hasMoreRef.current = page.length >= limit;
+      setHasMore(hasMoreRef.current);
+      setCommits(page);
+      commitDiffCache.current.clear();
+      // 同步刷新选中提交（保持选中，即使提交信息已变化）
+      setSelectedCommit((prev) => (prev ? page.find((c) => c.hash === prev.hash) ?? prev : prev));
+    } catch (e) {
+      setLogError(e instanceof Error ? e.message : String(e));
+    } finally {
+      logLoadingRef.current = false;
+      setLogLoading(false);
+    }
+  }, []);
+
+  /** 提交暂存区内容 */
+  const handleCommit = useCallback(async () => {
+    const message = commitMessage.trim();
+    if (!message || committing) return;
+    setCommitting(true);
+    setError(null);
+    try {
+      await commitChanges(message);
+      setCommitMessage("");
+      setSelectedFile(null);
+      setDiff(null);
+      setRightPanelMode("diff");
+      await loadStatus();
+      await refreshHistory();
+      setFolderRefreshKey((k) => k + 1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCommitting(false);
+    }
+  }, [commitMessage, committing, loadStatus, refreshHistory]);
+
+  // ── 窗口回到顶层时自动刷新：变更文件 + 历史记录 + 文件夹目录 ─────────
+  const lastAutoRefreshRef = useRef(0);
+  const handleAutoRefreshRef = useRef<() => void>(() => {});
+  handleAutoRefreshRef.current = () => {
+    const now = Date.now();
+    // 短时间内重复触发（如快速切窗）时合并为一次
+    if (now - lastAutoRefreshRef.current < 1200) return;
+    lastAutoRefreshRef.current = now;
+
+    loadStatusRef.current();
+    refreshHistory();
+    setFolderRefreshKey((k) => k + 1);
+  };
+
+  useEffect(() => {
+    const handleFocus = () => handleAutoRefreshRef.current();
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
+  }, []);
 
   const handleSwitchRepo = useCallback(() => {
     onCloseRepo();
@@ -598,17 +743,48 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
             </div>
           </div>
 
-          {/* Search box directly underneath the tabs */}
-          <div className="sidebar-search">
-            <Search size={14} className="sidebar-search-icon" />
-            <input
-              type="text"
-              className="sidebar-search-input"
-              placeholder={activeTab === "changes" ? "过滤变更文件..." : activeTab === "folders" ? "搜索文件或目录..." : "搜索提交记录、作者、哈希..."}
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-            />
-          </div>
+          {/* 变更 tab：提交信息输入 + 提交按钮；其他 tab：搜索框 */}
+          {activeTab === "changes" ? (
+            <div className="sidebar-commit">
+              <textarea
+                className="sidebar-commit-input"
+                placeholder="提交信息 (Commit message)"
+                value={commitMessage}
+                onChange={(e) => setCommitMessage(e.target.value)}
+                rows={2}
+                spellCheck={false}
+              />
+              <button
+                type="button"
+                className="sidebar-commit-btn"
+                onClick={handleCommit}
+                disabled={
+                  !commitMessage.trim() || committing || (status?.staged.length ?? 0) === 0
+                }
+                title={
+                  (status?.staged.length ?? 0) === 0
+                    ? "请先暂存变更后再提交"
+                    : "提交暂存区内容 (Commit)"
+                }
+              >
+                <GitCommit size={14} />
+                <span>{committing ? "提交中..." : "Commit 提交"}</span>
+              </button>
+            </div>
+          ) : (
+            <div className="sidebar-search">
+              <Search size={14} className="sidebar-search-icon" />
+              <input
+                type="text"
+                className="sidebar-search-input"
+                placeholder={
+                  activeTab === "folders" ? "搜索文件或目录..." : "搜索提交记录、作者、哈希..."
+                }
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+              />
+            </div>
+          )}
 
           {/* Sidebar Body */}
           {activeTab === "changes" && (
@@ -624,10 +800,14 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                 <FileList
                   status={status}
                   selectedPath={selectedFile?.path || null}
-                  onSelect={setSelectedFile}
-                  filter={filter}
-                  onFilterChange={setFilter}
+                  onSelect={handleSelectChangedFile}
                   onRevert={handleRevert}
+                  onStage={handleStage}
+                  onUnstage={handleUnstage}
+                  onPreview={handlePreviewChangedFile}
+                  onOpenAllChanges={handleOpenAllChanges}
+                  onStageAll={handleStageAll}
+                  onDiscardAll={() => setConfirmDiscardAll(true)}
                 />
               )}
             </>
@@ -652,6 +832,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
               repoPath={repo.path}
               filter={filter}
               status={status}
+              refreshKey={folderRefreshKey}
               onSelectFile={handleFolderFileSelect}
               selectedPath={selectedFolderFile?.fullPath ?? null}
             />
@@ -661,7 +842,9 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
         {/* ── Content Area: Changes Mode vs History Mode ─────────── */}
         {activeTab === "changes" && (
           <div className="diff-viewer">
-            {!selectedFile && (
+            {rightPanelMode === "all" && status && <AllChangesView status={status} />}
+
+            {!selectedFile && rightPanelMode !== "all" && (
               <div className="empty-state">
                 <div className="empty-state-icon-wrapper">
                   <FileCode2 size={32} strokeWidth={1.5} />
@@ -671,14 +854,34 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
               </div>
             )}
 
-            {selectedFile && diffLoading && (
+            {selectedFile && rightPanelMode === "file" && (
+              <div className="changes-file-preview">
+                <div className="changes-file-preview-bar">
+                  <button
+                    type="button"
+                    className="changes-file-preview-switch"
+                    onClick={() => setRightPanelMode("diff")}
+                  >
+                    <Diff size={13} />
+                    <span>查看变更对比</span>
+                  </button>
+                </div>
+                <FilePreview
+                  fullPath={selectedFileFullPath}
+                  relPath={selectedFile.path}
+                  change={selectedFile}
+                />
+              </div>
+            )}
+
+            {selectedFile && rightPanelMode === "diff" && diffLoading && (
               <div className="diff-loading">
                 <Loader2 size={13} className="spin" />
                 <span>正在读取 Diff...</span>
               </div>
             )}
 
-            {selectedFile && !diffLoading && diffError && (
+            {selectedFile && rightPanelMode === "diff" && !diffLoading && diffError && (
               <div className="empty-state">
                 <div className="empty-state-icon-wrapper" style={{ color: "var(--error-color)" }}>
                   <AlertTriangle size={32} strokeWidth={1.5} />
@@ -690,7 +893,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
               </div>
             )}
 
-            {selectedFile && !diffError && diff && (
+            {selectedFile && rightPanelMode === "diff" && !diffError && diff && (
               <DiffViewer
                 diff={diff}
                 file={selectedFile}
@@ -805,6 +1008,18 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
           />
         );
       })()}
+      {confirmDiscardAll && (
+        <ConfirmDialog
+          title="确认放弃所有工作区修改"
+          message={
+            "将把所有已跟踪文件恢复为暂存区内容，并删除所有未跟踪文件（遵循 .gitignore）。\n\n此操作不可恢复。"
+          }
+          confirmText="全部放弃"
+          cancelText="取消"
+          onConfirm={handleDiscardAllConfirm}
+          onCancel={() => setConfirmDiscardAll(false)}
+        />
+      )}
     </div>
   );
 }

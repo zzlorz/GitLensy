@@ -114,6 +114,26 @@ export async function revertFile(filePath: string, scope: string): Promise<void>
   return invoke<void>("revert_file", { filePath, scope });
 }
 
+/** 暂存单个文件（git add） */
+export async function stageFile(filePath: string): Promise<void> {
+  return invoke<void>("stage_file", { filePath });
+}
+
+/** 暂存所有变更（git add -A） */
+export async function stageAll(): Promise<void> {
+  return invoke<void>("stage_all");
+}
+
+/** 放弃所有工作区变更（已跟踪恢复、未跟踪删除） */
+export async function discardAllUnstaged(): Promise<void> {
+  return invoke<void>("discard_all_unstaged");
+}
+
+/** 提交暂存区内容 */
+export async function commitChanges(message: string): Promise<void> {
+  return invoke<void>("commit_changes", { message });
+}
+
 /** 动态同步更新原生窗口标题栏主题（暗色 / 亮色） */
 export async function setWindowTheme(theme: string): Promise<void> {
   return invoke<void>("set_window_theme", { theme });

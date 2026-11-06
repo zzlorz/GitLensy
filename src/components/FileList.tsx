@@ -1,15 +1,25 @@
-import { useState, useMemo, useEffect, useRef } from "react";
-import { ChevronDown, ChevronRight, RotateCcw, Undo2 } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { ChevronDown, ChevronRight, RotateCcw, Undo2, Plus, Minus, Eye, Diff } from "lucide-react";
 import type { GitStatus, ChangedFile, FileStatus } from "../types";
 
 interface Props {
   status: GitStatus;
   selectedPath: string | null;
   onSelect: (file: ChangedFile) => void;
-  filter: string;
-  onFilterChange: (val: string) => void;
   /** 撤销变更：由父组件调用 revertFile 后端命令后刷新状态 */
   onRevert: (file: ChangedFile, scope: "unstaged" | "staged" | "all") => void;
+  /** 暂存单个文件（git add） */
+  onStage: (file: ChangedFile) => void;
+  /** 取消暂存（保留工作区修改） */
+  onUnstage: (file: ChangedFile) => void;
+  /** 以文件预览方式打开（类似文件夹目录里的预览） */
+  onPreview: (file: ChangedFile) => void;
+  /** 打开所有变更文件的连续对比 */
+  onOpenAllChanges: () => void;
+  /** 暂存所有变更 */
+  onStageAll: () => void;
+  /** 放弃所有工作区变更 */
+  onDiscardAll: () => void;
 }
 
 function StatusBadge({ status }: { status: FileStatus }) {
@@ -44,19 +54,35 @@ interface ContextMenuState {
 function FileItem({
   file,
   selected,
+  scope,
   onClick,
   onContextMenu,
+  onRevert,
+  onStage,
+  onUnstage,
+  onPreview,
 }: {
   file: ChangedFile;
   selected: boolean;
+  scope: "unstaged" | "staged";
   onClick: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
+  onRevert: (file: ChangedFile, scope: "unstaged" | "staged" | "all") => void;
+  onStage: (file: ChangedFile) => void;
+  onUnstage: (file: ChangedFile) => void;
+  onPreview: (file: ChangedFile) => void;
 }) {
   const displayStatus = file.staged_status || file.unstaged_status || "modified";
+  const isDeleted = file.staged_status === "deleted" || file.unstaged_status === "deleted";
   const normalizedPath = file.path.replace(/\\/g, "/");
   const lastSlashIndex = normalizedPath.lastIndexOf("/");
   const dirPathWithoutSlash = lastSlashIndex !== -1 ? normalizedPath.slice(0, lastSlashIndex) : "";
   const fileName = lastSlashIndex !== -1 ? normalizedPath.slice(lastSlashIndex + 1) : normalizedPath;
+
+  const handleAction = (e: React.MouseEvent, action: () => void) => {
+    e.stopPropagation();
+    action();
+  };
 
   return (
     <div
@@ -67,10 +93,10 @@ function FileItem({
     >
       <StatusBadge status={displayStatus} />
       <div className="file-name">
+        <span className="file-base">{fileName}</span>
         {dirPathWithoutSlash && (
           <span className="file-dir">{dirPathWithoutSlash}</span>
         )}
-        <span className="file-base">{fileName}</span>
       </div>
       <div className="file-stats">
         {file.additions > 0 && (
@@ -78,6 +104,47 @@ function FileItem({
         )}
         {file.deletions > 0 && (
           <span className="stat-deletions">-{file.deletions}</span>
+        )}
+      </div>
+      <div className="file-actions">
+        {!isDeleted && (
+          <button
+            type="button"
+            className="file-action-btn"
+            title="打开文件预览 (Open File)"
+            onClick={(e) => handleAction(e, () => onPreview(file))}
+          >
+            <Eye size={13} />
+          </button>
+        )}
+        {scope === "unstaged" ? (
+          <>
+            <button
+              type="button"
+              className="file-action-btn danger"
+              title="放弃工作区修改 (Discard Changes)"
+              onClick={(e) => handleAction(e, () => onRevert(file, "unstaged"))}
+            >
+              <Undo2 size={13} />
+            </button>
+            <button
+              type="button"
+              className="file-action-btn"
+              title="暂存此文件 (Stage Changes)"
+              onClick={(e) => handleAction(e, () => onStage(file))}
+            >
+              <Plus size={13} />
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            className="file-action-btn"
+            title="取消暂存 (Unstage Changes)"
+            onClick={(e) => handleAction(e, () => onUnstage(file))}
+          >
+            <Minus size={13} />
+          </button>
         )}
       </div>
     </div>
@@ -90,6 +157,11 @@ function FileSection({
   selectedPath,
   onSelect,
   onItemContextMenu,
+  onRevert,
+  onStage,
+  onUnstage,
+  onPreview,
+  headerActions,
   scope,
   defaultCollapsed = false,
   grow = false,
@@ -99,6 +171,12 @@ function FileSection({
   selectedPath: string | null;
   onSelect: (file: ChangedFile) => void;
   onItemContextMenu: (file: ChangedFile, scope: "unstaged" | "staged", e: React.MouseEvent) => void;
+  onRevert: (file: ChangedFile, scope: "unstaged" | "staged" | "all") => void;
+  onStage: (file: ChangedFile) => void;
+  onUnstage: (file: ChangedFile) => void;
+  onPreview: (file: ChangedFile) => void;
+  /** 标题栏右侧的整段操作按钮 */
+  headerActions?: React.ReactNode;
   scope: "unstaged" | "staged";
   defaultCollapsed?: boolean;
   grow?: boolean;
@@ -115,6 +193,11 @@ function FileSection({
         )}
         <span>{title}</span>
         <span className="file-section-count">{files.length}</span>
+        {headerActions && files.length > 0 && (
+          <div className="file-section-actions" onClick={(e) => e.stopPropagation()}>
+            {headerActions}
+          </div>
+        )}
       </div>
 
       {!collapsed && (
@@ -129,8 +212,13 @@ function FileSection({
                 key={file.path}
                 file={file}
                 selected={selectedPath === file.path}
+                scope={scope}
                 onClick={() => onSelect(file)}
                 onContextMenu={(e) => onItemContextMenu(file, scope, e)}
+                onRevert={onRevert}
+                onStage={onStage}
+                onUnstage={onUnstage}
+                onPreview={onPreview}
               />
             ))
           )}
@@ -144,9 +232,13 @@ export default function FileList({
   status,
   selectedPath,
   onSelect,
-  filter,
-  onFilterChange: _onFilterChange,
   onRevert,
+  onStage,
+  onUnstage,
+  onPreview,
+  onOpenAllChanges,
+  onStageAll,
+  onDiscardAll,
 }: Props) {
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -189,18 +281,6 @@ export default function FileList({
     setCtxMenu({ file, scope, x, y });
   };
 
-  const filteredUnstaged = useMemo(() => {
-    if (!filter.trim()) return status.unstaged;
-    const q = filter.toLowerCase();
-    return status.unstaged.filter((f) => f.path.toLowerCase().includes(q));
-  }, [status.unstaged, filter]);
-
-  const filteredStaged = useMemo(() => {
-    if (!filter.trim()) return status.staged;
-    const q = filter.toLowerCase();
-    return status.staged.filter((f) => f.path.toLowerCase().includes(q));
-  }, [status.staged, filter]);
-
   const handleMenuAction = (action: "scope" | "all") => {
     if (!ctxMenu) return;
     const scope = action === "all" ? "all" : ctxMenu.scope;
@@ -220,20 +300,56 @@ export default function FileList({
     <div ref={containerRef} className="file-list-container">
       <FileSection
         title="工作区变更 (Unstaged)"
-        files={filteredUnstaged}
+        files={status.unstaged}
         selectedPath={selectedPath}
         onSelect={onSelect}
         onItemContextMenu={handleItemContextMenu}
+        onRevert={onRevert}
+        onStage={onStage}
+        onUnstage={onUnstage}
+        onPreview={onPreview}
+        headerActions={
+          <>
+            <button
+              type="button"
+              className="file-action-btn"
+              title="打开所有变更对比 (Open Changes)"
+              onClick={onOpenAllChanges}
+            >
+              <Diff size={13} />
+            </button>
+            <button
+              type="button"
+              className="file-action-btn danger"
+              title="放弃所有工作区修改 (Discard All Changes)"
+              onClick={onDiscardAll}
+            >
+              <Undo2 size={13} />
+            </button>
+            <button
+              type="button"
+              className="file-action-btn"
+              title="暂存所有变更 (Stage All Changes)"
+              onClick={onStageAll}
+            >
+              <Plus size={13} />
+            </button>
+          </>
+        }
         scope="unstaged"
         grow={true}
       />
 
       <FileSection
         title="暂存区变更 (Staged)"
-        files={filteredStaged}
+        files={status.staged}
         selectedPath={selectedPath}
         onSelect={onSelect}
         onItemContextMenu={handleItemContextMenu}
+        onRevert={onRevert}
+        onStage={onStage}
+        onUnstage={onUnstage}
+        onPreview={onPreview}
         scope="staged"
         defaultCollapsed={status.staged.length === 0}
       />

@@ -15,6 +15,8 @@ interface Props {
   repoPath: string;
   filter: string;
   status: GitStatus | null;
+  /** 数值递增时重新扫描目录树（保留当前展开状态） */
+  refreshKey?: number;
   onSelectFile: (fullPath: string, relPath: string) => void;
   selectedPath: string | null;
 }
@@ -221,6 +223,7 @@ export default function FolderTree({
   repoPath,
   filter,
   status,
+  refreshKey = 0,
   onSelectFile,
   selectedPath,
 }: Props) {
@@ -232,8 +235,8 @@ export default function FolderTree({
 
   const statusMap = useMemo(() => buildStatusMap(status), [status]);
 
-  const loadTree = useCallback(async () => {
-    if (loadedRepoRef.current === repoPath && tree) return;
+  const loadTree = useCallback(async (force: boolean) => {
+    if (!force && loadedRepoRef.current === repoPath && tree) return;
 
     setLoading(true);
     setError(null);
@@ -247,8 +250,8 @@ export default function FolderTree({
       const nodes = await buildTree(normalizedPath, "");
       setTree(nodes);
       loadedRepoRef.current = repoPath;
-      // 默认全部折叠，用户手动展开
-      setExpanded(new Set());
+      // 首次加载默认全部折叠；强制刷新时保留用户已有的展开状态
+      if (!force) setExpanded(new Set());
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setTree([]);
@@ -258,8 +261,16 @@ export default function FolderTree({
   }, [repoPath, tree]);
 
   useEffect(() => {
-    loadTree();
+    loadTree(false);
   }, [loadTree]);
+
+  // 外部触发（窗口回到顶层 / 主动刷新）时重新扫描目录
+  const lastRefreshKeyRef = useRef(refreshKey);
+  useEffect(() => {
+    if (lastRefreshKeyRef.current === refreshKey) return;
+    lastRefreshKeyRef.current = refreshKey;
+    loadTree(true);
+  }, [refreshKey, loadTree]);
 
   const handleToggle = useCallback((path: string) => {
     setExpanded((prev) => {

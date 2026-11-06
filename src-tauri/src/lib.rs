@@ -38,6 +38,10 @@ pub fn run() {
             commands::open_terminal,
             commands::set_window_theme,
             commands::revert_file,
+            commands::stage_file,
+            commands::stage_all,
+            commands::discard_all_unstaged,
+            commands::commit_changes,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application")

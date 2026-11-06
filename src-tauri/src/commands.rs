@@ -334,3 +334,115 @@ fn revert_all(
     let _ = (x, y);
     Ok(())
 }
+
+/// 暂存指定文件（等价于 `git add -- <path>`）。
+#[tauri::command]
+pub async fn stage_file(
+    file_path: String,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    let repo_path = {
+        let repo_path = state.repo_path.lock().unwrap();
+        repo_path
+            .as_ref()
+            .ok_or(crate::error::AppError::NoRepository)?
+            .clone()
+    };
+
+    git::run_git(Path::new(&repo_path), &["add", "--", &file_path])?;
+    Ok(())
+}
+
+/// 是否存在未解决的合并冲突条目
+fn has_unmerged_changes(repo: &Path) -> AppResult<bool> {
+    let out = git::run_git_string(repo, &["status", "--porcelain=v1", "-z"])?;
+    let bytes = out.as_bytes();
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        let x = bytes[i] as char;
+        let y = bytes[i + 1] as char;
+        if matches!(x, 'D' | 'A' | 'U') && matches!(y, 'D' | 'A' | 'U') {
+            return Ok(true);
+        }
+        // 跳过当前条目：XY + 空格 + 路径 + NUL
+        match bytes[i..].iter().position(|b| *b == 0) {
+            Some(pos) => i += pos + 1,
+            None => break,
+        }
+    }
+    Ok(false)
+}
+
+/// 暂存所有变更（含新增与删除），等价于 `git add -A`。
+#[tauri::command]
+pub async fn stage_all(state: State<'_, AppState>) -> AppResult<()> {
+    let repo_path = {
+        let repo_path = state.repo_path.lock().unwrap();
+        repo_path
+            .as_ref()
+            .ok_or(crate::error::AppError::NoRepository)?
+            .clone()
+    };
+    let path = Path::new(&repo_path);
+
+    if has_unmerged_changes(path)? {
+        return Err(AppError::GitCommand(
+            "存在未解决的合并冲突，请手动解决后再操作".to_string(),
+        ));
+    }
+
+    git::run_git(path, &["add", "-A"])?;
+    Ok(())
+}
+
+/// 放弃所有工作区变更：已跟踪文件恢复到暂存区状态，未跟踪文件直接删除。
+#[tauri::command]
+pub async fn discard_all_unstaged(state: State<'_, AppState>) -> AppResult<()> {
+    let repo_path = {
+        let repo_path = state.repo_path.lock().unwrap();
+        repo_path
+            .as_ref()
+            .ok_or(crate::error::AppError::NoRepository)?
+            .clone()
+    };
+    let path = Path::new(&repo_path);
+
+    if has_unmerged_changes(path)? {
+        return Err(AppError::GitCommand(
+            "存在未解决的合并冲突，请手动解决后再操作".to_string(),
+        ));
+    }
+
+    // 已跟踪文件：工作区恢复为暂存区内容，不触碰暂存区
+    git::run_git(path, &["restore", "--worktree", "--", "."])?;
+    // 未跟踪文件/目录：直接清理（遵循 .gitignore）
+    git::run_git(path, &["clean", "-fd"])?;
+    Ok(())
+}
+
+/// 提交暂存区内容，提交信息来自输入框。
+#[tauri::command]
+pub async fn commit_changes(state: State<'_, AppState>, message: String) -> AppResult<()> {
+    let message = message.trim();
+    if message.is_empty() {
+        return Err(AppError::GitCommand("提交信息不能为空".to_string()));
+    }
+
+    let repo_path = {
+        let repo_path = state.repo_path.lock().unwrap();
+        repo_path
+            .as_ref()
+            .ok_or(crate::error::AppError::NoRepository)?
+            .clone()
+    };
+    let path = Path::new(&repo_path);
+
+    if has_unmerged_changes(path)? {
+        return Err(AppError::GitCommand(
+            "存在未解决的合并冲突，请手动解决后再提交".to_string(),
+        ));
+    }
+
+    git::run_git(path, &["commit", "-m", message])?;
+    Ok(())
+}

@@ -466,6 +466,66 @@ input {
   align-items: center;
 }
 
+/* 变更 tab 的提交信息区 */
+.sidebar-commit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.sidebar-commit-input {
+  width: 100%;
+  min-height: 48px;
+  max-height: 120px;
+  padding: 6px 8px;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  resize: vertical;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.sidebar-commit-input::placeholder {
+  color: var(--text-muted);
+}
+
+.sidebar-commit-input:focus {
+  border-color: var(--accent-color);
+}
+
+.sidebar-commit-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background-color: var(--accent-color);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.sidebar-commit-btn:hover:not(:disabled) {
+  background-color: var(--accent-hover);
+}
+
+.sidebar-commit-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .sidebar-search-icon {
   position: absolute;
   left: 22px;
@@ -543,6 +603,30 @@ input {
   font-size: 11px;
   font-weight: 600;
   color: var(--text-secondary);
+}
+
+/* 区块标题右侧的整段操作（全部暂存 / 全部放弃） */
+.file-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+}
+
+.file-section-actions .file-action-btn {
+  width: 20px;
+  height: 20px;
+}
+
+/* 标题栏本身悬停时为 --bg-tertiary，按钮需用更亮的背景区分 */
+.file-section-actions .file-action-btn:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.file-section-actions .file-action-btn.danger:hover {
+  background-color: var(--deleted-bg);
+  color: var(--deleted-color);
 }
 
 .file-list {
@@ -625,19 +709,14 @@ input {
   font-size: 12.5px;
 }
 
-/* 目录路径部分：优先被省略（中间压缩，保留尾部斜杠和文件名） */
+/* 目录路径部分：排在文件名之后，空间不足时优先省略 */
 .file-dir {
   flex: 1;
   min-width: 0;
+  margin-left: 6px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--text-muted);
-  font-size: 11px;
-}
-
-.file-dir::after {
-  content: "/";
   color: var(--text-muted);
   font-size: 11px;
 }
@@ -682,6 +761,48 @@ input {
 }
 
 .stat-deletions {
+  color: var(--deleted-color);
+}
+
+/* 文件条目悬停操作按钮（暂存 / 取消暂存 / 放弃修改） */
+.file-actions {
+  display: none;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.file-item:hover .file-actions {
+  display: flex;
+}
+
+/* 悬停时用操作按钮替换右侧增删统计，避免挤压文件名 */
+.file-item:hover .file-stats {
+  display: none;
+}
+
+.file-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background-color 0.1s, color 0.1s;
+}
+
+.file-action-btn:hover {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.file-action-btn.danger:hover {
+  background-color: var(--deleted-bg);
   color: var(--deleted-color);
 }
 
@@ -848,6 +969,149 @@ input {
   overflow: hidden;
   background-color: var(--bg-primary);
   position: relative;
+}
+
+/* 变更 tab：切换到文件内容预览时的容器与切换按钮 */
+.changes-file-preview {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.changes-file-preview-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.changes-file-preview-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background-color 0.1s, color 0.1s;
+}
+
+.changes-file-preview-switch:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.changes-file-preview > .file-preview {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+
+/* 全部变更文件连续对比视图 */
+.all-changes-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--bg-primary);
+}
+
+.all-changes-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.all-changes-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.all-changes-count {
+  padding: 1px 7px;
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.all-changes-toolbar .diff-view-toggle {
+  margin-left: auto;
+}
+
+.all-changes-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* 多文件视图里取消 hunk 标题吸顶，避免与文件标题重叠 */
+.all-changes-scroll .diff-hunk-header {
+  position: static;
+}
+
+.all-diff-file + .all-diff-file {
+  border-top: 1px solid var(--border-color);
+}
+
+.all-diff-file-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background-color: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.all-diff-file-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.all-diff-file-stats {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
+.all-changes-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 48px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.all-diff-error {
+  padding: 16px;
+  color: var(--error-color);
+  font-size: 12px;
 }
 
 .diff-header {
@@ -1076,6 +1340,61 @@ input {
   content: " ";
   position: absolute;
   left: 8px;
+}
+
+/* 左右双栏对比视图 */
+.diff-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  min-width: 100%;
+}
+
+.diff-split-header {
+  grid-column: 1 / -1;
+}
+
+.diff-split-cell {
+  display: flex;
+  align-items: flex-start;
+  min-width: 0;
+  min-height: 20px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.diff-split-cell .diff-line-num {
+  width: 44px;
+  padding: 0 6px;
+  border-right: 1px solid var(--border-subtle);
+}
+
+.diff-split-cell .diff-line-content {
+  flex: 1;
+  min-width: 0;
+  padding: 0 10px;
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.diff-split-cell.add {
+  background-color: var(--added-line-bg);
+}
+
+.diff-split-cell.remove {
+  background-color: var(--deleted-line-bg);
+}
+
+.diff-split-cell.empty {
+  background-color: var(--bg-secondary);
+}
+
+.diff-split-right {
+  border-left: 1px solid var(--border-color);
+}
+
+.diff-split-cell:hover {
+  filter: brightness(1.12);
 }
 
 /* Empty / Loading states */

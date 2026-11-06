@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import {
   FileCode2,
   ArrowRight,
@@ -9,7 +9,7 @@ import {
   Binary,
   Hash,
 } from "lucide-react";
-import type { FileDiff, ChangedFile, DiffView } from "../types";
+import type { FileDiff, ChangedFile, DiffView, DiffHunk, DiffLine } from "../types";
 
 interface Props {
   diff: FileDiff;
@@ -33,8 +33,71 @@ function statusLabel(status: string): string {
   return labels[status] || status;
 }
 
+export type DiffLayout = "unified" | "split";
+const LAYOUT_KEY = "gitlensy:diffLayout";
+
+/** 读取用户上次选择的 diff 布局 */
+export function getSavedDiffLayout(): DiffLayout {
+  return localStorage.getItem(LAYOUT_KEY) === "split" ? "split" : "unified";
+}
+
+/** 记住 diff 布局选择 */
+export function saveDiffLayout(layout: DiffLayout): void {
+  localStorage.setItem(LAYOUT_KEY, layout);
+}
+
+interface SplitRow {
+  left?: DiffLine;
+  right?: DiffLine;
+}
+
+/** 把 hunk 内的删除行与新增行按下标配对，供左右双栏渲染 */
+function buildSplitRows(hunk: DiffHunk): SplitRow[] {
+  const rows: SplitRow[] = [];
+  const lines = hunk.lines;
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (line.type === "context") {
+      rows.push({ left: line, right: line });
+      i += 1;
+      continue;
+    }
+    const removes: DiffLine[] = [];
+    const adds: DiffLine[] = [];
+    while (i < lines.length && lines[i].type === "remove") {
+      removes.push(lines[i]);
+      i += 1;
+    }
+    while (i < lines.length && lines[i].type === "add") {
+      adds.push(lines[i]);
+      i += 1;
+    }
+    if (removes.length === 0 && adds.length === 0) {
+      i += 1;
+      continue;
+    }
+    const count = Math.max(removes.length, adds.length);
+    for (let k = 0; k < count; k += 1) {
+      rows.push({ left: removes[k], right: adds[k] });
+    }
+  }
+  return rows;
+}
+
 export default function DiffViewer({ diff, file, view, onViewChange, contextLabel }: Props) {
   const [copied, setCopied] = useState(false);
+  // 单文件视图默认统一单栏，不再沿用上次的双栏选择
+  const [layout, setLayout] = useState<DiffLayout>("unified");
+  const changeLayout = (next: DiffLayout) => {
+    setLayout(next);
+    saveDiffLayout(next);
+  };
+
+  // 每次点击（切换）文件都回到统一单栏视图
+  useEffect(() => {
+    setLayout("unified");
+  }, [file.path]);
   const displayPath = diff.new_path !== "/dev/null" ? diff.new_path : diff.old_path;
   const displayStatus = file.staged_status || file.unstaged_status || file.status || "modified";
   const hasBoth = file.has_staged_changes && file.has_unstaged_changes;
@@ -85,6 +148,23 @@ export default function DiffViewer({ diff, file, view, onViewChange, contextLabe
               </button>
             </div>
           )}
+
+          <div className="diff-view-toggle">
+            <button
+              className={`diff-view-btn ${layout === "unified" ? "active" : ""}`}
+              onClick={() => changeLayout("unified")}
+              title="统一视图：增删行上下排列"
+            >
+              统一
+            </button>
+            <button
+              className={`diff-view-btn ${layout === "split" ? "active" : ""}`}
+              onClick={() => changeLayout("split")}
+              title="双栏视图：原版本与新版本左右对比"
+            >
+              双栏
+            </button>
+          </div>
         </div>
 
         <div className="diff-info">
@@ -119,62 +199,107 @@ export default function DiffViewer({ diff, file, view, onViewChange, contextLabe
         </div>
       </div>
 
-      <div className="diff-content">
-        {diff.is_binary && (
-          <div className="binary-notice">
-            <Binary size={36} strokeWidth={1.5} />
-            <div>二进制文件，无法展示文本 Diff</div>
-          </div>
-        )}
+      <DiffBody diff={diff} layout={layout} />
+    </>
+  );
+}
 
-        {!diff.is_binary && diff.hunks.length === 0 && !diff.error && (
-          <div className="empty-state" style={{ height: "auto", padding: 48 }}>
-            <div className="empty-state-icon-wrapper" style={{ color: "var(--added-color)" }}>
-              <CheckCircle2 size={32} strokeWidth={1.5} />
-            </div>
-            <div className="empty-state-text">无内容变动</div>
-            <div className="empty-state-sub">文件内容与基准版本一致</div>
-          </div>
-        )}
+/** 文件 diff 内容区（供单文件视图与全部变更视图复用） */
+export function DiffBody({ diff, layout }: { diff: FileDiff; layout: DiffLayout }) {
+  return (
+    <div className="diff-content">
+      {diff.is_binary && (
+        <div className="binary-notice">
+          <Binary size={36} strokeWidth={1.5} />
+          <div>二进制文件，无法展示文本 Diff</div>
+        </div>
+      )}
 
-        {diff.error && (
-          <div className="empty-state" style={{ height: "auto", padding: 48 }}>
-            <div className="empty-state-icon-wrapper" style={{ color: "var(--error-color)" }}>
-              <AlertTriangle size={32} strokeWidth={1.5} />
-            </div>
-            <div className="empty-state-text">获取 Diff 失败</div>
-            <div style={{ fontSize: 12, color: "var(--error-color)", maxWidth: 440, textAlign: "center", marginTop: 4 }}>
-              {diff.error}
-            </div>
+      {!diff.is_binary && diff.hunks.length === 0 && !diff.error && (
+        <div className="empty-state" style={{ height: "auto", padding: 48 }}>
+          <div className="empty-state-icon-wrapper" style={{ color: "var(--added-color)" }}>
+            <CheckCircle2 size={32} strokeWidth={1.5} />
           </div>
-        )}
+          <div className="empty-state-text">无内容变动</div>
+          <div className="empty-state-sub">文件内容与基准版本一致</div>
+        </div>
+      )}
 
-        {!diff.is_binary && (
-          <div className="diff-table">
-            {diff.hunks.map((hunk, hunkIndex) => (
-              <div key={hunkIndex} className="diff-hunk">
-                <div className="diff-hunk-header">
+      {diff.error && (
+        <div className="empty-state" style={{ height: "auto", padding: 48 }}>
+          <div className="empty-state-icon-wrapper" style={{ color: "var(--error-color)" }}>
+            <AlertTriangle size={32} strokeWidth={1.5} />
+          </div>
+          <div className="empty-state-text">获取 Diff 失败</div>
+          <div style={{ fontSize: 12, color: "var(--error-color)", maxWidth: 440, textAlign: "center", marginTop: 4 }}>
+            {diff.error}
+          </div>
+        </div>
+      )}
+
+      {!diff.is_binary && layout === "unified" && (
+        <div className="diff-table">
+          {diff.hunks.map((hunk, hunkIndex) => (
+            <div key={hunkIndex} className="diff-hunk">
+              <div className="diff-hunk-header">
+                <Hash size={12} style={{ color: "var(--text-muted)" }} />
+                <span>
+                  @@ -{hunk.old_start},{hunk.old_lines} +{hunk.new_start},{hunk.new_lines} @@
+                </span>
+              </div>
+              {hunk.lines.map((line, lineIndex) => (
+                <div key={lineIndex} className={`diff-line ${line.type}`}>
+                  <span className="diff-line-num">
+                    {line.type === "add" ? "" : line.old_line_number > 0 ? line.old_line_number : ""}
+                  </span>
+                  <span className="diff-line-num">
+                    {line.type === "remove" ? "" : line.new_line_number > 0 ? line.new_line_number : ""}
+                  </span>
+                  <span className="diff-line-content">{line.content || " "}</span>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!diff.is_binary && layout === "split" && (
+        <div className="diff-split">
+          {diff.hunks.map((hunk, hunkIndex) => {
+            const rows = buildSplitRows(hunk);
+            return (
+              <Fragment key={hunkIndex}>
+                <div className="diff-hunk-header diff-split-header">
                   <Hash size={12} style={{ color: "var(--text-muted)" }} />
                   <span>
                     @@ -{hunk.old_start},{hunk.old_lines} +{hunk.new_start},{hunk.new_lines} @@
                   </span>
                 </div>
-                {hunk.lines.map((line, lineIndex) => (
-                  <div key={lineIndex} className={`diff-line ${line.type}`}>
-                    <span className="diff-line-num">
-                      {line.type === "add" ? "" : line.old_line_number > 0 ? line.old_line_number : ""}
-                    </span>
-                    <span className="diff-line-num">
-                      {line.type === "remove" ? "" : line.new_line_number > 0 ? line.new_line_number : ""}
-                    </span>
-                    <span className="diff-line-content">{line.content || " "}</span>
-                  </div>
+                {rows.map((row, rowIndex) => (
+                  <Fragment key={rowIndex}>
+                    <div
+                      className={`diff-split-cell diff-split-left ${row.left ? row.left.type : "empty"}`}
+                    >
+                      <span className="diff-line-num">
+                        {row.left && row.left.old_line_number > 0 ? row.left.old_line_number : ""}
+                      </span>
+                      <span className="diff-line-content">{row.left ? row.left.content || " " : ""}</span>
+                    </div>
+                    <div
+                      className={`diff-split-cell diff-split-right ${row.right ? row.right.type : "empty"}`}
+                    >
+                      <span className="diff-line-num">
+                        {row.right && row.right.new_line_number > 0 ? row.right.new_line_number : ""}
+                      </span>
+                      <span className="diff-line-content">{row.right ? row.right.content || " " : ""}</span>
+                    </div>
+                  </Fragment>
                 ))}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </>
+              </Fragment>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
