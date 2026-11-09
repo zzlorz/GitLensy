@@ -43,6 +43,16 @@ pub async fn get_status(state: State<'_, AppState>) -> AppResult<GitStatus> {
 }
 
 #[tauri::command]
+pub async fn get_repo_change_count(path: String) -> AppResult<usize> {
+    let status = status::get_status(&path)?;
+    let mut seen = std::collections::HashSet::new();
+    for file in status.staged.iter().chain(status.unstaged.iter()) {
+        seen.insert(file.path.clone());
+    }
+    Ok(seen.len())
+}
+
+#[tauri::command]
 pub async fn get_file_diff(
     file_path: String,
     view: DiffView,
@@ -525,5 +535,488 @@ pub async fn sync_changes(state: State<'_, AppState>) -> AppResult<()> {
         git::run_git(path, &["pull", "--ff-only"])?;
     }
     git::run_git(path, &["push"])?;
+    Ok(())
+}
+
+/// 拉取远程变更（仅快进，不产生合并提交）
+#[tauri::command]
+pub async fn pull_changes(state: State<'_, AppState>) -> AppResult<()> {
+    let repo_path = {
+        let repo_path = state.repo_path.lock().unwrap();
+        repo_path
+            .as_ref()
+            .ok_or(crate::error::AppError::NoRepository)?
+            .clone()
+    };
+    let path = Path::new(&repo_path);
+
+    if has_unmerged_changes(path)? {
+        return Err(AppError::GitCommand(
+            "存在未解决的合并冲突，请手动解决后再拉取".to_string(),
+        ));
+    }
+    if !sync_status_for(path)?.has_upstream {
+        return Err(AppError::GitCommand(
+            "当前分支未关联远程分支，无法拉取".to_string(),
+        ));
+    }
+
+    git::run_git(path, &["pull", "--ff-only"])?;
+    Ok(())
+}
+
+/// 获取远程更新（git fetch --all --prune，仅更新远程引用，不合并到本地）
+#[tauri::command]
+pub async fn fetch_changes(state: State<'_, AppState>) -> AppResult<()> {
+    let repo_path = {
+        let repo_path = state.repo_path.lock().unwrap();
+        repo_path
+            .as_ref()
+            .ok_or(crate::error::AppError::NoRepository)?
+            .clone()
+    };
+    let path = Path::new(&repo_path);
+
+    git::run_git(path, &["fetch", "--all", "--prune"])?;
+    Ok(())
+}
+
+/// 新建分支：checkout 为 true 时创建并切换到新分支
+#[tauri::command]
+pub async fn create_branch(
+    state: State<'_, AppState>,
+    name: String,
+    checkout: bool,
+) -> AppResult<()> {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err(AppError::GitCommand("分支名称不能为空".to_string()));
+    }
+
+    let repo_path = {
+        let repo_path = state.repo_path.lock().unwrap();
+        repo_path
+            .as_ref()
+            .ok_or(crate::error::AppError::NoRepository)?
+            .clone()
+    };
+    let path = Path::new(&repo_path);
+
+    // 引用名校验，同时拦截 checkout 时的路径歧义
+    if git::run_git(path, &["check-ref-format", "--branch", &name]).is_err() {
+        return Err(AppError::GitCommand(format!("分支名称不合法：{}", name)));
+    }
+
+    let ref_name = format!("refs/heads/{}", name);
+    if git::run_git(path, &["show-ref", "--verify", "--quiet", &ref_name]).is_ok() {
+        return Err(AppError::GitCommand(format!("分支 {} 已存在", name)));
+    }
+
+    if checkout {
+        git::run_git(path, &["checkout", "-b", &name])?;
+    } else {
+        git::run_git(path, &["branch", &name])?;
+    }
+    Ok(())
+}
+
+/// 新建标签：message 非空时创建附注标签，否则创建轻量标签
+#[tauri::command]
+pub async fn create_tag(
+    state: State<'_, AppState>,
+    name: String,
+    message: Option<String>,
+) -> AppResult<()> {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err(AppError::GitCommand("标签名称不能为空".to_string()));
+    }
+
+    let repo_path = {
+        let repo_path = state.repo_path.lock().unwrap();
+        repo_path
+            .as_ref()
+            .ok_or(crate::error::AppError::NoRepository)?
+            .clone()
+    };
+    let path = Path::new(&repo_path);
+
+    // 空仓库没有 HEAD，无法打标签
+    if git::run_git(path, &["rev-parse", "--verify", "HEAD"]).is_err() {
+        return Err(AppError::GitCommand(
+            "当前仓库还没有提交，无法创建标签".to_string(),
+        ));
+    }
+
+    let ref_name = format!("refs/tags/{}", name);
+    if git::run_git(path, &["check-ref-format", &ref_name]).is_err() {
+        return Err(AppError::GitCommand(format!("标签名称不合法：{}", name)));
+    }
+    if git::run_git(path, &["show-ref", "--verify", "--quiet", &ref_name]).is_ok() {
+        return Err(AppError::GitCommand(format!("标签 {} 已存在", name)));
+    }
+
+    let msg = message
+        .map(|m| m.trim().to_string())
+        .filter(|m| !m.is_empty());
+    match msg {
+        Some(ref m) => git::run_git(path, &["tag", "-a", &name, "-m", m])?,
+        None => git::run_git(path, &["tag", &name])?,
+    }
+    Ok(())
+}
+
+/// 推送本地提交到远程
+#[tauri::command]
+pub async fn push_changes(state: State<'_, AppState>) -> AppResult<()> {
+    let repo_path = {
+        let repo_path = state.repo_path.lock().unwrap();
+        repo_path
+            .as_ref()
+            .ok_or(crate::error::AppError::NoRepository)?
+            .clone()
+    };
+    let path = Path::new(&repo_path);
+
+    if !sync_status_for(path)?.has_upstream {
+        return Err(AppError::GitCommand(
+            "当前分支未关联远程分支，无法推送".to_string(),
+        ));
+    }
+
+    git::run_git(path, &["push"])?;
+    Ok(())
+}
+
+/// 贮藏当前工作区变更（含未跟踪文件）
+#[tauri::command]
+pub async fn stash_changes(
+    state: State<'_, AppState>,
+    message: Option<String>,
+) -> AppResult<()> {
+    let repo_path = {
+        let repo_path = state.repo_path.lock().unwrap();
+        repo_path
+            .as_ref()
+            .ok_or(crate::error::AppError::NoRepository)?
+            .clone()
+    };
+    let path = Path::new(&repo_path);
+
+    // 没有任何变更时拒绝贮藏，避免生成空 stash
+    let current = status::get_status(&repo_path)?;
+    if current.staged.is_empty() && current.unstaged.is_empty() {
+        return Err(AppError::GitCommand("当前没有可贮藏的变更".to_string()));
+    }
+
+    let msg = message
+        .map(|m| m.trim().to_string())
+        .filter(|m| !m.is_empty());
+
+    let mut args: Vec<&str> = vec!["stash", "push", "--include-untracked"];
+    if let Some(ref m) = msg {
+        args.push("-m");
+        args.push(m);
+    }
+
+    git::run_git(path, &args)?;
+    Ok(())
+}
+
+/// 列出当前仓库的所有贮藏记录（最新的在最前）
+#[tauri::command]
+pub async fn get_stash_list(state: State<'_, AppState>) -> AppResult<Vec<crate::models::StashEntry>> {
+    let repo_path = {
+        let repo_path = state.repo_path.lock().unwrap();
+        repo_path
+            .as_ref()
+            .ok_or(crate::error::AppError::NoRepository)?
+            .clone()
+    };
+    let path = Path::new(&repo_path);
+
+    let lines = git::run_git_lines(path, &["stash", "list", "--format=%gd%x1f%gs%x1f%cr"])?;
+    Ok(lines
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            let mut parts = line.split('\x1f');
+            let ref_name = parts.next()?.trim().to_string();
+            if ref_name.is_empty() {
+                return None;
+            }
+            Some(crate::models::StashEntry {
+                index,
+                ref_name,
+                message: parts.next().unwrap_or("").to_string(),
+                date: parts.next().unwrap_or("").to_string(),
+            })
+        })
+        .collect())
+}
+
+/// 恢复指定序号的贮藏（pop），成功后该记录从列表中移除
+#[tauri::command]
+pub async fn pop_stash(state: State<'_, AppState>, index: usize) -> AppResult<()> {
+    let repo_path = {
+        let repo_path = state.repo_path.lock().unwrap();
+        repo_path
+            .as_ref()
+            .ok_or(crate::error::AppError::NoRepository)?
+            .clone()
+    };
+    let path = Path::new(&repo_path);
+    let ref_name = format!("stash@{{{}}}", index);
+    git::run_git(path, &["stash", "pop", &ref_name])
+}
+
+/// 应用指定序号的贮藏（apply），不删除记录
+#[tauri::command]
+pub async fn apply_stash(state: State<'_, AppState>, index: usize) -> AppResult<()> {
+    let repo_path = {
+        let repo_path = state.repo_path.lock().unwrap();
+        repo_path
+            .as_ref()
+            .ok_or(crate::error::AppError::NoRepository)?
+            .clone()
+    };
+    let path = Path::new(&repo_path);
+    let ref_name = format!("stash@{{{}}}", index);
+    git::run_git(path, &["stash", "apply", &ref_name])
+}
+
+/// 删除指定序号的贮藏记录（不应用到工作区）
+#[tauri::command]
+pub async fn drop_stash(state: State<'_, AppState>, index: usize) -> AppResult<()> {
+    let repo_path = {
+        let repo_path = state.repo_path.lock().unwrap();
+        repo_path
+            .as_ref()
+            .ok_or(crate::error::AppError::NoRepository)?
+            .clone()
+    };
+    let path = Path::new(&repo_path);
+    let ref_name = format!("stash@{{{}}}", index);
+    git::run_git(path, &["stash", "drop", &ref_name])
+}
+
+/// 清空全部贮藏记录
+#[tauri::command]
+pub async fn clear_stashes(state: State<'_, AppState>) -> AppResult<()> {
+    let repo_path = {
+        let repo_path = state.repo_path.lock().unwrap();
+        repo_path
+            .as_ref()
+            .ok_or(crate::error::AppError::NoRepository)?
+            .clone()
+    };
+    let path = Path::new(&repo_path);
+    git::run_git(path, &["stash", "clear"])
+}
+
+/// 在外部编辑器中打开项目目录或文件（默认 VS Code：code）
+#[tauri::command]
+pub async fn open_in_editor(path: String, editor: Option<String>) -> AppResult<()> {
+    let target = Path::new(&path);
+    if !target.exists() {
+        return Err(AppError::PathNotFound(path.clone()));
+    }
+
+    let editor = editor
+        .map(|e| e.trim().to_string())
+        .filter(|e| !e.is_empty())
+        .unwrap_or_else(|| "code".to_string());
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+        // 直接通过 cmd /C 启动编辑器，不使用 start，避免额外弹出控制台/PowerShell 窗口
+        std::process::Command::new("cmd")
+            .arg("/C")
+            .arg(&editor)
+            .arg(&path)
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .map_err(|e| AppError::GitCommand(format!("启动编辑器失败（{}）：{}", editor, e)))?;
+    }
+
+    #[cfg(not(windows))]
+    {
+        std::process::Command::new(&editor)
+            .arg(&path)
+            .spawn()
+            .map_err(|e| AppError::GitCommand(format!("启动编辑器失败（{}）：{}", editor, e)))?;
+    }
+
+    Ok(())
+}
+
+/// Windows 的 explorer.exe 不认正斜杠路径：传入 `D:/foo/bar` 时不会打开目标目录，
+/// 而是错误地打开「文档」。git 返回的仓库根路径恰好是 `D:/foo/bar` 形式，
+/// 因此交给系统 Shell 前统一转成反斜杠的原生路径。
+#[cfg(windows)]
+fn to_native_windows_path(path: &str) -> String {
+    let mut normalized = path.replace('/', "\\");
+    // 去掉末尾多余的分隔符，但保留盘符根目录（如 `C:\`）
+    while normalized.len() > 3 && normalized.ends_with('\\') {
+        normalized.pop();
+    }
+    normalized
+}
+
+/// 按指定方式打开项目或文件：editor（默认编辑器）/ explorer（资源管理器）/ system（默认应用）
+#[tauri::command]
+pub async fn open_with_method(
+    path: String,
+    method: String,
+    editor: Option<String>,
+) -> AppResult<()> {
+    let target = Path::new(&path);
+    if !target.exists() {
+        return Err(AppError::PathNotFound(path.clone()));
+    }
+
+    match method.trim().to_lowercase().as_str() {
+        "explorer" => {
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+                let native_path = to_native_windows_path(&path);
+                let mut cmd = std::process::Command::new("explorer");
+                if target.is_file() {
+                    // 文件：打开其所在文件夹并选中该文件
+                    cmd.raw_arg(format!("/select,\"{}\"", native_path));
+                } else {
+                    // 文件夹 / 项目：直接打开该文件夹
+                    cmd.arg(&native_path);
+                }
+                cmd.creation_flags(CREATE_NO_WINDOW)
+                    .spawn()
+                    .map_err(|e| AppError::GitCommand(format!("打开资源管理器失败：{}", e)))?;
+            }
+            #[cfg(not(windows))]
+            {
+                std::process::Command::new("xdg-open")
+                    .arg(if target.is_file() {
+                        target.parent().unwrap_or(target)
+                    } else {
+                        target
+                    })
+                    .spawn()
+                    .map_err(|e| AppError::GitCommand(format!("打开资源管理器失败：{}", e)))?;
+            }
+            Ok(())
+        }
+        "system" | "default" => {
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+                // 弹出 Windows 的「选择一个应用打开」对话框（文件/文件夹都走系统选择）
+                std::process::Command::new("rundll32.exe")
+                    .arg("shell32.dll,OpenAs_RunDLL")
+                    .arg(to_native_windows_path(&path))
+                    .creation_flags(CREATE_NO_WINDOW)
+                    .spawn()
+                    .map_err(|e| {
+                        AppError::GitCommand(format!("打开「选择应用」对话框失败：{}", e))
+                    })?;
+            }
+            #[cfg(not(windows))]
+            {
+                std::process::Command::new("xdg-open")
+                    .arg(&path)
+                    .spawn()
+                    .map_err(|e| AppError::GitCommand(format!("用默认应用打开失败：{}", e)))?;
+            }
+            Ok(())
+        }
+        _ => open_in_editor(path, editor).await,
+    }
+}
+
+/// 列出本地与远程分支（远程已 fetch 的引用）
+#[tauri::command]
+pub async fn get_branches(
+    state: State<'_, AppState>,
+) -> AppResult<crate::models::BranchList> {
+    let repo_path = {
+        let repo_path = state.repo_path.lock().unwrap();
+        repo_path
+            .as_ref()
+            .ok_or(crate::error::AppError::NoRepository)?
+            .clone()
+    };
+    let path = Path::new(&repo_path);
+
+    let local = git::run_git_lines(path, &["branch", "--format=%(refname:short)"])?
+        .into_iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>();
+
+    let remote = git::run_git_lines(path, &["branch", "-r", "--format=%(refname:short)"])?
+        .into_iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty() && !s.ends_with("/HEAD"))
+        .collect::<Vec<_>>();
+
+    let mut current =
+        git::run_git_string(path, &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_default();
+    current = current.trim().to_string();
+    if current == "HEAD" {
+        current.clear();
+    }
+
+    Ok(crate::models::BranchList {
+        current,
+        local,
+        remote,
+    })
+}
+
+/// 切换分支；远程分支会自动创建同名本地分支并跟踪
+#[tauri::command]
+pub async fn checkout_branch(
+    state: State<'_, AppState>,
+    name: String,
+    is_remote: bool,
+) -> AppResult<()> {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err(AppError::GitCommand("分支名称不能为空".to_string()));
+    }
+
+    let repo_path = {
+        let repo_path = state.repo_path.lock().unwrap();
+        repo_path
+            .as_ref()
+            .ok_or(crate::error::AppError::NoRepository)?
+            .clone()
+    };
+    let path = Path::new(&repo_path);
+
+    if is_remote {
+        // origin/feature/login → 去掉远程名前缀，得到本地分支名
+        let short = match name.split_once('/') {
+            Some((_, rest)) if !rest.is_empty() => rest.to_string(),
+            _ => return Err(AppError::GitCommand(format!("远程分支名称不合法：{}", name))),
+        };
+
+        let local_ref = format!("refs/heads/{}", short);
+        if git::run_git(path, &["show-ref", "--verify", "--quiet", &local_ref]).is_ok() {
+            // 本地已有同名分支，直接切换
+            git::run_git(path, &["checkout", &short])?;
+        } else {
+            git::run_git(path, &["checkout", "-b", &short, "--track", &name])?;
+        }
+    } else {
+        git::run_git(path, &["checkout", &name])?;
+    }
     Ok(())
 }

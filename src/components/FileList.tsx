@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from "react";
-import { ChevronDown, ChevronRight, RotateCcw, Undo2, Plus, Minus, Eye, Diff } from "lucide-react";
+import { useState } from "react";
+import { ChevronDown, ChevronRight, Undo2, Plus, Minus, FileText, FileStack } from "lucide-react";
 import type { GitStatus, ChangedFile, FileStatus } from "../types";
 
 interface Props {
@@ -44,19 +44,11 @@ function StatusBadge({ status }: { status: FileStatus }) {
   );
 }
 
-interface ContextMenuState {
-  file: ChangedFile;
-  scope: "unstaged" | "staged";
-  x: number;
-  y: number;
-}
-
 function FileItem({
   file,
   selected,
   scope,
   onClick,
-  onContextMenu,
   onRevert,
   onStage,
   onUnstage,
@@ -66,7 +58,6 @@ function FileItem({
   selected: boolean;
   scope: "unstaged" | "staged";
   onClick: () => void;
-  onContextMenu: (e: React.MouseEvent) => void;
   onRevert: (file: ChangedFile, scope: "unstaged" | "staged" | "all") => void;
   onStage: (file: ChangedFile) => void;
   onUnstage: (file: ChangedFile) => void;
@@ -88,7 +79,6 @@ function FileItem({
     <div
       className={`file-item ${selected ? "selected" : ""}`}
       onClick={onClick}
-      onContextMenu={onContextMenu}
       title={file.path}
     >
       <StatusBadge status={displayStatus} />
@@ -114,7 +104,7 @@ function FileItem({
             title="打开文件预览 (Open File)"
             onClick={(e) => handleAction(e, () => onPreview(file))}
           >
-            <Eye size={13} />
+            <FileText size={13} />
           </button>
         )}
         {scope === "unstaged" ? (
@@ -156,7 +146,6 @@ function FileSection({
   files,
   selectedPath,
   onSelect,
-  onItemContextMenu,
   onRevert,
   onStage,
   onUnstage,
@@ -170,7 +159,6 @@ function FileSection({
   files: ChangedFile[];
   selectedPath: string | null;
   onSelect: (file: ChangedFile) => void;
-  onItemContextMenu: (file: ChangedFile, scope: "unstaged" | "staged", e: React.MouseEvent) => void;
   onRevert: (file: ChangedFile, scope: "unstaged" | "staged" | "all") => void;
   onStage: (file: ChangedFile) => void;
   onUnstage: (file: ChangedFile) => void;
@@ -214,7 +202,6 @@ function FileSection({
                 selected={selectedPath === file.path}
                 scope={scope}
                 onClick={() => onSelect(file)}
-                onContextMenu={(e) => onItemContextMenu(file, scope, e)}
                 onRevert={onRevert}
                 onStage={onStage}
                 onUnstage={onUnstage}
@@ -240,70 +227,13 @@ export default function FileList({
   onStageAll,
   onDiscardAll,
 }: Props) {
-  const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  // 点击其他地方关闭右键菜单
-  useEffect(() => {
-    if (!ctxMenu) return;
-    const closeMenu = () => setCtxMenu(null);
-    // 用 setTimeout 延迟注册，避免右键事件本身冒泡到 window 立即触发关闭
-    const timerId = window.setTimeout(() => {
-      window.addEventListener("click", closeMenu);
-      window.addEventListener("contextmenu", closeMenu);
-    }, 0);
-    return () => {
-      window.clearTimeout(timerId);
-      window.removeEventListener("click", closeMenu);
-      window.removeEventListener("contextmenu", closeMenu);
-    };
-  }, [ctxMenu]);
-
-  const handleItemContextMenu = (
-    file: ChangedFile,
-    scope: "unstaged" | "staged",
-    e: React.MouseEvent,
-  ) => {
-    e.preventDefault();
-    // 算出相对于容器的坐标，避免超出屏幕
-    const container = containerRef.current;
-    let x = e.clientX;
-    let y = e.clientY;
-    if (container) {
-      const rect = container.getBoundingClientRect();
-      const menuW = 200;
-      const menuH = 130;
-      x = Math.min(x, rect.right - menuW - 4);
-      y = Math.min(y, rect.bottom - menuH - 4);
-      x = Math.max(x, rect.left + 2);
-      y = Math.max(y, rect.top + 2);
-    }
-    setCtxMenu({ file, scope, x, y });
-  };
-
-  const handleMenuAction = (action: "scope" | "all") => {
-    if (!ctxMenu) return;
-    const scope = action === "all" ? "all" : ctxMenu.scope;
-    onRevert(ctxMenu.file, scope as "unstaged" | "staged" | "all");
-    setCtxMenu(null);
-  };
-
-  // 判断菜单项是否需要显示 "全部丢弃"：文件同时有 staged 和 unstaged 变化时才有意义
-  const hasBothChanges = ctxMenu
-    ? ctxMenu.file.has_staged_changes && ctxMenu.file.has_unstaged_changes
-    : false;
-
-  // 菜单项的主标签根据右键位置决定
-  const primaryLabel = ctxMenu?.scope === "unstaged" ? "撤销工作区修改" : "取消暂存";
-
   return (
-    <div ref={containerRef} className="file-list-container">
+    <div className="file-list-container">
       <FileSection
         title="工作区变更 (Unstaged)"
         files={status.unstaged}
         selectedPath={selectedPath}
         onSelect={onSelect}
-        onItemContextMenu={handleItemContextMenu}
         onRevert={onRevert}
         onStage={onStage}
         onUnstage={onUnstage}
@@ -316,7 +246,7 @@ export default function FileList({
               title="打开所有变更对比 (Open Changes)"
               onClick={onOpenAllChanges}
             >
-              <Diff size={13} />
+              <FileStack size={13} />
             </button>
             <button
               type="button"
@@ -345,7 +275,6 @@ export default function FileList({
         files={status.staged}
         selectedPath={selectedPath}
         onSelect={onSelect}
-        onItemContextMenu={handleItemContextMenu}
         onRevert={onRevert}
         onStage={onStage}
         onUnstage={onUnstage}
@@ -353,36 +282,6 @@ export default function FileList({
         scope="staged"
         defaultCollapsed={status.staged.length === 0}
       />
-
-      {ctxMenu && (
-        <div
-          className="context-menu"
-          style={{ left: ctxMenu.x, top: ctxMenu.y }}
-          onClick={(e) => e.stopPropagation()}
-          onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
-        >
-          <div className="context-menu-title">{ctxMenu.file.path}</div>
-          <button
-            className="context-menu-item"
-            onClick={() => handleMenuAction("scope")}
-          >
-            {ctxMenu.scope === "unstaged" ? (
-              <><RotateCcw size={12} /> <span>撤销工作区修改</span></>
-            ) : (
-              <><Undo2 size={12} /> <span>取消暂存</span></>
-            )}
-          </button>
-          {hasBothChanges && (
-            <button
-              className="context-menu-item"
-              onClick={() => handleMenuAction("all")}
-            >
-              <Undo2 size={12} /> <span>全部丢弃</span>
-            </button>
-          )}
-          <div className="context-menu-hint">{primaryLabel}（破坏性操作）</div>
-        </div>
-      )}
     </div>
   );
 }

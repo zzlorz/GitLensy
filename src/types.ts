@@ -15,6 +15,21 @@ export interface SyncStatus {
   behind: number;
 }
 
+/** 一条贮藏记录 */
+export interface StashEntry {
+  index: number;
+  ref_name: string;
+  message: string;
+  date: string;
+}
+
+/** 本地 / 远程分支列表 */
+export interface BranchList {
+  current: string;
+  local: string[];
+  remote: string[];
+}
+
 export type FileStatus =
   | "modified"
   | "added"
@@ -98,6 +113,8 @@ export interface CommitInfo {
   date_relative: string;
   /** 0 = root commit, 2+ = merge commit */
   parent_count: number;
+  /** Full parent SHAs, first parent first */
+  parents: string[];
 }
 
 export interface CommitFile {

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { X, Moon, Sun, Monitor, Check } from "lucide-react";
 import type { ThemeMode } from "../types";
 
@@ -7,6 +7,9 @@ interface Props {
   onClose: () => void;
   theme: ThemeMode;
   onThemeChange: (theme: ThemeMode) => void;
+  /** 外部编辑器命令，默认 code（VS Code） */
+  editor: string;
+  onEditorChange: (editor: string) => void;
 }
 
 export default function SettingsModal({
@@ -14,7 +17,16 @@ export default function SettingsModal({
   onClose,
   theme,
   onThemeChange,
+  editor,
+  onEditorChange,
 }: Props) {
+  // 编辑器命令用本地草稿，失焦或回车时才提交，避免输入过程被裁剪
+  const [editorDraft, setEditorDraft] = useState(editor);
+
+  useEffect(() => {
+    if (isOpen) setEditorDraft(editor);
+  }, [isOpen, editor]);
+
   // ESC 快捷键关闭
   useEffect(() => {
     if (!isOpen) return;
@@ -125,6 +137,43 @@ export default function SettingsModal({
                   </div>
                 );
               })}
+            </div>
+          </div>
+
+          <div className="settings-section">
+            <div className="settings-section-title">外部编辑器</div>
+            <div className="settings-section-desc">
+              「在编辑器中打开」项目或文件时使用的命令，默认为 VS Code 的 code。
+            </div>
+            <div className="settings-editor-row">
+              <input
+                className="settings-editor-input"
+                type="text"
+                spellCheck={false}
+                value={editorDraft}
+                placeholder="code"
+                onChange={(e) => setEditorDraft(e.target.value)}
+                onBlur={() => onEditorChange(editorDraft)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    onEditorChange(editorDraft);
+                    e.currentTarget.blur();
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="settings-editor-reset"
+                onClick={() => {
+                  setEditorDraft("code");
+                  onEditorChange("code");
+                }}
+              >
+                恢复默认
+              </button>
+            </div>
+            <div className="settings-editor-hint">
+              也可填写 cursor、subl、idea 等可执行命令；未安装时打开会提示失败。
             </div>
           </div>
         </div>

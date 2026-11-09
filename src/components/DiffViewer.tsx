@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import {
   FileCode2,
   ArrowRight,
@@ -7,9 +7,20 @@ import {
   CheckCircle2,
   AlertTriangle,
   Binary,
+  ChevronDown,
+  ExternalLink,
   Hash,
 } from "lucide-react";
 import type { FileDiff, ChangedFile, DiffView, DiffHunk, DiffLine } from "../types";
+import { openPath } from "../api/tauri";
+import type { OpenMethod } from "../api/tauri";
+
+/** 预览页「打开方式」下拉选项 */
+const OPEN_METHODS: { id: OpenMethod; label: string }[] = [
+  { id: "editor", label: "VS Code" },
+  { id: "explorer", label: "文件资源管理器" },
+  { id: "system", label: "默认应用" },
+];
 
 interface Props {
   diff: FileDiff;
@@ -18,6 +29,8 @@ interface Props {
   onViewChange: (view: DiffView) => void;
   /** 覆盖右上角的 diff 来源说明（例如历史视图里显示「本次提交」） */
   contextLabel?: string;
+  /** 仓库根目录；提供时在头部显示「打开方式」（历史提交视图不传） */
+  repoPath?: string;
 }
 
 function statusLabel(status: string): string {
@@ -85,10 +98,12 @@ function buildSplitRows(hunk: DiffHunk): SplitRow[] {
   return rows;
 }
 
-export default function DiffViewer({ diff, file, view, onViewChange, contextLabel }: Props) {
+export default function DiffViewer({ diff, file, view, onViewChange, contextLabel, repoPath }: Props) {
   const [copied, setCopied] = useState(false);
   // 单文件视图默认统一单栏，不再沿用上次的双栏选择
   const [layout, setLayout] = useState<DiffLayout>("unified");
+  const [openMenuOpen, setOpenMenuOpen] = useState(false);
+  const openMenuRef = useRef<HTMLDivElement>(null);
   const changeLayout = (next: DiffLayout) => {
     setLayout(next);
     saveDiffLayout(next);
@@ -97,10 +112,36 @@ export default function DiffViewer({ diff, file, view, onViewChange, contextLabe
   // 每次点击（切换）文件都回到统一单栏视图
   useEffect(() => {
     setLayout("unified");
+    setOpenMenuOpen(false);
   }, [file.path]);
+
+  // 点击外部关闭「打开方式」下拉
+  useEffect(() => {
+    if (!openMenuOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (openMenuRef.current && !openMenuRef.current.contains(e.target as Node)) {
+        setOpenMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [openMenuOpen]);
+
   const displayPath = diff.new_path !== "/dev/null" ? diff.new_path : diff.old_path;
   const displayStatus = file.staged_status || file.unstaged_status || file.status || "modified";
   const hasBoth = file.has_staged_changes && file.has_unstaged_changes;
+  const isDeleted = file.staged_status === "deleted" || file.unstaged_status === "deleted";
+
+  const handleOpenWith = async (method: OpenMethod) => {
+    if (!repoPath) return;
+    setOpenMenuOpen(false);
+    const root = repoPath.replace(/[\\/]+$/, "");
+    try {
+      await openPath(`${root}/${file.path}`, method);
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   const handleCopyPath = () => {
     navigator.clipboard.writeText(displayPath);
@@ -189,6 +230,35 @@ export default function DiffViewer({ diff, file, view, onViewChange, contextLabe
                 <span className="diff-stat-pill del">-{diff.deletions}</span>
               )}
             </>
+          )}
+
+          {repoPath && !isDeleted && (
+            <div className="diff-open-with" ref={openMenuRef}>
+              <button
+                type="button"
+                className={`diff-open-with-btn ${openMenuOpen ? "open" : ""}`}
+                onClick={() => setOpenMenuOpen((v) => !v)}
+                title="选择打开方式"
+              >
+                <ExternalLink size={11} />
+                <span>打开方式</span>
+                <ChevronDown size={11} />
+              </button>
+              {openMenuOpen && (
+                <div className="diff-open-with-menu">
+                  {OPEN_METHODS.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className="diff-open-with-item"
+                      onClick={() => handleOpenWith(item.id)}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
 
           {!hasBoth && (

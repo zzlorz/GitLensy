@@ -80,6 +80,10 @@ pub fn parse_commit_log(raw: &[u8]) -> Vec<CommitInfo> {
         }
 
         let parent_hashes = fields[7].trim();
+        let parents: Vec<String> = parent_hashes
+            .split_whitespace()
+            .map(|s| s.to_string())
+            .collect();
 
         commits.push(CommitInfo {
             hash,
@@ -89,7 +93,8 @@ pub fn parse_commit_log(raw: &[u8]) -> Vec<CommitInfo> {
             author_email: fields[4].trim().to_string(),
             date: fields[5].trim().to_string(),
             date_relative: fields[6].trim().to_string(),
-            parent_count: parent_hashes.split_whitespace().count(),
+            parent_count: parents.len(),
+            parents,
             body: fields.get(8).map(|s| s.trim().to_string()).unwrap_or_default(),
         });
     }

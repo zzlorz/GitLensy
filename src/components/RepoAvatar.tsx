@@ -1,9 +1,9 @@
 import { useMemo } from "react";
-import { getRecentRepos } from "../api/tauri";
 
 interface Props {
   repoName: string;
-  repoPath: string;
+  /** 同一首字母分组内的编号（从 0 开始）；不传或为 null 时不显示数字 */
+  index?: number | null;
   size?: number;
 }
 
@@ -24,33 +24,12 @@ function hashColor(s: string): number {
   return h % PALETTE.length;
 }
 
-/**
- * 计算当前仓库在"相同首字母仓库"里的序号。
- * 合并 recent repos + 当前仓库，按路径排序后取相同首字母分组的索引。
- * 例如：有 MyApp 和 MyLib 两个仓库 → MyApp=1, MyLib=2
- */
-function computeIndex(repoName: string, repoPath: string): number {
-  const letter = (repoName[0] || "?").toUpperCase();
-  const all = getRecentRepos().map((r) => ({ name: r.name, path: r.path }));
-  // 确保当前仓库也参与计算
-  if (!all.some((r) => r.path === repoPath)) {
-    all.push({ name: repoName, path: repoPath });
-  }
-  // 同首字母的按路径排序
-  const same = all
-    .filter((r) => (r.name[0] || "?").toUpperCase() === letter)
-    .sort((a, b) => a.path.localeCompare(b.path));
-  const idx = same.findIndex((r) => r.path === repoPath);
-  return idx >= 0 ? idx + 1 : 1;
-}
-
-export default function RepoAvatar({ repoName, repoPath, size = 18 }: Props) {
-  const { letter, index, color } = useMemo(() => {
-    const letter = (repoName[0] || "?").toUpperCase();
-    const index = computeIndex(repoName, repoPath);
+export default function RepoAvatar({ repoName, index = null, size = 18 }: Props) {
+  const { letter, color } = useMemo(() => {
+    const letter = (repoName.trim()[0] || "?").toUpperCase();
     const color = PALETTE[hashColor(repoName)];
-    return { letter, index, color };
-  }, [repoName, repoPath]);
+    return { letter, color };
+  }, [repoName]);
 
   // 字号：根据尺寸自适应
   const fontSize = Math.max(8, Math.floor(size * 0.8));
@@ -70,7 +49,7 @@ export default function RepoAvatar({ repoName, repoPath, size = 18 }: Props) {
       title={repoName}
     >
       <span className="repo-avatar-letter">{letter}</span>
-      {index > 1 && <span className="repo-avatar-num">{index}</span>}
+      {index !== null && <span className="repo-avatar-num">{index}</span>}
     </div>
   );
 }

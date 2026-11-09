@@ -4,7 +4,7 @@ import WelcomePage from "./pages/WelcomePage";
 import MainWorkspace from "./pages/MainWorkspace";
 import SettingsModal from "./components/SettingsModal";
 import type { RepositoryInfo, ThemeMode } from "./types";
-import { getSavedRepo, saveCurrentRepo, openRepository, closeRepository, setWindowTheme } from "./api/tauri";
+import { getSavedRepo, saveCurrentRepo, openRepository, closeRepository, setWindowTheme, getPreferredEditor, setPreferredEditor } from "./api/tauri";
 
 const THEME_KEY = "gitlensy:theme";
 
@@ -25,6 +25,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [theme, setTheme] = useState<ThemeMode>(getInitialTheme);
+  const [editor, setEditor] = useState<string>(getPreferredEditor);
   const [showSettings, setShowSettings] = useState(false);
   const manuallyClosed = useRef(false);
 
@@ -60,6 +61,11 @@ export default function App() {
     } catch {
       // ignore
     }
+  }, []);
+
+  const handleEditorChange = useCallback((value: string) => {
+    setPreferredEditor(value);
+    setEditor(getPreferredEditor());
   }, []);
 
   // Try to restore last opened repo on first mount
@@ -143,6 +149,8 @@ export default function App() {
         onClose={() => setShowSettings(false)}
         theme={theme}
         onThemeChange={handleThemeChange}
+        editor={editor}
+        onEditorChange={handleEditorChange}
       />
     </>
   );

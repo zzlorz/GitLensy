@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
-  GitBranch, RefreshCw, FolderSync, Terminal, ChevronDown,
-  FileCode2, AlertTriangle, Loader2, GitCommit, Diff, Search, Settings, FolderOpen, X,
+  GitBranch, RotateCw, FolderSync, Terminal, MoreHorizontal, Tag, Archive, ArchiveRestore, Trash2,
+  FileCode2, AlertTriangle, Loader2, GitCommit, Diff, Search, Settings, X,
+  Download, Upload, ChevronDown, Check, ExternalLink,
 } from "lucide-react";
 import FileList from "../components/FileList";
 import CommitList from "../components/CommitList";
@@ -9,13 +10,21 @@ import CommitDetail from "../components/CommitDetail";
 import DiffViewer from "../components/DiffViewer";
 import AllChangesView from "../components/AllChangesView";
 import ConfirmDialog from "../components/ConfirmDialog";
-import FolderTree from "../components/FolderTree";
 import FilePreview from "../components/FilePreview";
-import RepoAvatar from "../components/RepoAvatar";
-import type { RepositoryInfo, GitStatus, ChangedFile, DiffView, FileDiff, CommitInfo, CommitFile, RecentRepo, SyncStatus } from "../types";
-import { getStatus, getFileDiff, saveCurrentRepo, getCommitLog, getCommitFiles, getCommitFileDiff, openTerminal, revertFile, stageFile, stageAll, discardAllUnstaged, commitChanges, getSyncStatus, syncChanges, getRecentRepos, openRepository, removeRecentRepo } from "../api/tauri";
+import ProjectSidebar from "../components/ProjectSidebar";
+import { WindowControls, WindowResizeHandles } from "../components/WindowControls";
+import type { RepositoryInfo, GitStatus, ChangedFile, DiffView, FileDiff, CommitInfo, CommitFile, RecentRepo, SyncStatus, StashEntry, BranchList } from "../types";
+import { getStatus, getFileDiff, saveCurrentRepo, getCommitLog, getCommitFiles, getCommitFileDiff, openTerminal, revertFile, stageFile, stageAll, discardAllUnstaged, commitChanges, getSyncStatus, syncChanges, pullChanges, fetchChanges, pushChanges, createBranch, createTag, stashChanges, getStashList, popStash, applyStash, dropStash, clearStashes, getBranches, checkoutBranch, openPath, getRecentRepos, openRepository, removeRecentRepo } from "../api/tauri";
+import type { OpenMethod } from "../api/tauri";
 
 const PAGE_SIZE = 50;
+
+/** 打开方式选项与显示名 */
+const OPEN_METHODS: { id: OpenMethod; label: string }[] = [
+  { id: "editor", label: "VS Code" },
+  { id: "explorer", label: "文件资源管理器" },
+  { id: "system", label: "默认应用" },
+];
 
 /** Adapter so we can reuse DiffViewer for commit files */
 function makeChangedFile(file: CommitFile) {
@@ -40,35 +49,19 @@ interface Props {
   onOpenSettings?: () => void;
 }
 
-type Tab = "changes" | "history" | "folders";
+type Tab = "changes" | "history";
 
 export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenSettings }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>("changes");
   const [filter, setFilter] = useState("");
 
-  // ── Repo switcher dropdown ─────────────────────────────────────────────
-  const [repoMenuOpen, setRepoMenuOpen] = useState(false);
   const [recentRepos, setRecentRepos] = useState<RecentRepo[]>(getRecentRepos());
-  const repoMenuRef = useRef<HTMLDivElement>(null);
-
-  // 点击外部关闭下拉菜单
-  useEffect(() => {
-    if (!repoMenuOpen) return;
-    const handler = (e: MouseEvent) => {
-      if (repoMenuRef.current && !repoMenuRef.current.contains(e.target as Node)) {
-        setRepoMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [repoMenuOpen]);
 
   const refreshRecentRepos = useCallback(() => {
     setRecentRepos(getRecentRepos());
   }, []);
 
   const handleOpenRecentRepo = useCallback(async (path: string) => {
-    setRepoMenuOpen(false);
     try {
       const info = await openRepository(path);
       saveCurrentRepo(info);
@@ -80,14 +73,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
     }
   }, [onRepoUpdate, onCloseRepo, refreshRecentRepos]);
 
-  const handleRemoveRecent = useCallback((e: React.MouseEvent, path: string) => {
-    e.stopPropagation();
-    removeRecentRepo(path);
-    refreshRecentRepos();
-  }, [refreshRecentRepos]);
-
   const handleOpenOtherRepo = useCallback(() => {
-    setRepoMenuOpen(false);
     onCloseRepo();
   }, [onCloseRepo]);
 
@@ -107,6 +93,26 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
   /** 当前分支与远程的同步状态 */
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   const [syncing, setSyncing] = useState(false);
+  /** 工具栏拉取/获取/推送的进行中标记 */
+  const [remoteBusy, setRemoteBusy] = useState<"pull" | "fetch" | "push" | null>(null);
+  /** 更多操作菜单与输入弹窗 */
+  const [toolMenuOpen, setToolMenuOpen] = useState(false);
+  const [toolAction, setToolAction] = useState<"branch" | "tag" | "stash" | "stashes" | null>(null);
+  const [toolInput, setToolInput] = useState("");
+  const [toolBusy, setToolBusy] = useState(false);
+  const [toolError, setToolError] = useState<string | null>(null);
+  /** 贮藏列表弹窗的数据 */
+  const [stashes, setStashes] = useState<StashEntry[]>([]);
+  /** 贮藏删除的二次确认 */
+  const [stashConfirm, setStashConfirm] = useState<{ type: "drop"; index: number } | { type: "clear" } | null>(null);
+  /** 分支切换下拉 */
+  const [branches, setBranches] = useState<BranchList | null>(null);
+  const [branchMenuOpen, setBranchMenuOpen] = useState(false);
+  const [branchBusy, setBranchBusy] = useState(false);
+
+  // ── 打开方式下拉（一次性选择，不记录状态）──────────────────────────
+  const [openMenuOpen, setOpenMenuOpen] = useState(false);
+  const openMenuRef = useRef<HTMLDivElement>(null);
 
   // ── Changes tab state ─────────────────────────────────────────────────
   const [status, setStatus] = useState<GitStatus | null>(null);
@@ -130,6 +136,34 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
   onRepoUpdateRef.current = onRepoUpdate;
   const repoRef = useRef(repo);
   repoRef.current = repo;
+
+  const handleRemoveRecentRepo = useCallback((path: string) => {
+    removeRecentRepo(path);
+    refreshRecentRepos();
+  }, [refreshRecentRepos]);
+
+  /** 跨项目打开文件：等仓库切换后的重置 effect 执行完再应用目标文件 */
+  const pendingProjectFileRef = useRef<{ fullPath: string; relPath: string } | null>(null);
+
+  const handleProjectFileClick = useCallback(
+    async (repoPath: string, fullPath: string, relPath: string) => {
+      if (repoRef.current?.path === repoPath) {
+        setSelectedFolderFile({ fullPath, relPath });
+        return;
+      }
+      pendingProjectFileRef.current = { fullPath, relPath };
+      try {
+        const info = await openRepository(repoPath);
+        saveCurrentRepo(info);
+        onRepoUpdateRef.current(info);
+        refreshRecentRepos();
+      } catch (e) {
+        pendingProjectFileRef.current = null;
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    },
+    [refreshRecentRepos]
+  );
 
   // ── 仓库切换时重置所有状态并重新加载 ────────────────────────────────
   useEffect(() => {
@@ -156,6 +190,13 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
 
     // 重置文件夹 tab 状态
     setSelectedFolderFile(null);
+
+    // 从最左侧项目侧边栏跨项目打开文件：重置完成后再应用目标文件
+    if (pendingProjectFileRef.current) {
+      const target = pendingProjectFileRef.current;
+      pendingProjectFileRef.current = null;
+      setSelectedFolderFile(target);
+    }
 
     // 重新加载变更列表
     loadStatus();
@@ -322,6 +363,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
 
   const handleSelectCommit = useCallback(async (commit: CommitInfo) => {
     if (selectedCommit?.hash === commit.hash) return;
+    setSelectedFolderFile(null);
     setSelectedCommit(commit);
     setSelectedCommitFile(null);
     setCommitDiff(null);
@@ -391,10 +433,39 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
     }
   }, []);
 
-  /** 文件夹 tab 中点击文件：直接在右侧独立预览（不走 Git Diff） */
-  const handleFolderFileSelect = useCallback((fullPath: string, relPath: string) => {
-    setSelectedFolderFile({ fullPath, relPath });
-  }, []);
+  /** 用 VS Code（设置中的编辑器命令）打开当前项目 */
+  const handleOpenProject = useCallback(async () => {
+    try {
+      await openPath(repo.path, "editor");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [repo.path]);
+
+  /** 一次性选择打开方式：按所选方式打开后关闭下拉，不记录选择 */
+  const handleOpenOnce = useCallback(
+    async (method: OpenMethod) => {
+      setOpenMenuOpen(false);
+      try {
+        await openPath(repo.path, method);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    },
+    [repo.path],
+  );
+
+  // 点外部关闭打开方式下拉
+  useEffect(() => {
+    if (!openMenuOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (openMenuRef.current && !openMenuRef.current.contains(e.target as Node)) {
+        setOpenMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [openMenuOpen]);
 
   /** 第一步：右键菜单点击撤销 → 仅弹出确认框，不执行任何 git 操作 */
   const handleRevert = useCallback(
@@ -468,18 +539,21 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
 
   /** 点击文件条目：右侧展示变更对比 */
   const handleSelectChangedFile = useCallback((file: ChangedFile) => {
+    setSelectedFolderFile(null);
     setSelectedFile(file);
     setRightPanelMode("diff");
   }, []);
 
   /** 悬停"打开文件"：右侧按文件夹目录的预览方式展示文件内容 */
   const handlePreviewChangedFile = useCallback((file: ChangedFile) => {
+    setSelectedFolderFile(null);
     setSelectedFile(file);
     setRightPanelMode("file");
   }, []);
 
   /** 预览所有变更文件：按文件顺序从上到下连续对比 */
   const handleOpenAllChanges = useCallback(() => {
+    setSelectedFolderFile(null);
     setRightPanelMode("all");
   }, []);
 
@@ -488,28 +562,6 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
     const base = repo.path.replace(/\\/g, "/").replace(/\/+$/, "");
     return `${base}/${selectedFile.path.replace(/\\/g, "/")}`;
   }, [repo.path, selectedFile]);
-
-  const handleRefresh = useCallback(() => {
-    if (activeTab === "changes") {
-      loadStatus();
-    } else if (activeTab === "folders") {
-      // 文件夹页：同时刷新变更标注和目录树
-      loadStatus();
-      setFolderRefreshKey((k) => k + 1);
-    } else {
-      // Reload history
-      offsetRef.current = 0;
-      hasMoreRef.current = true;
-      setCommits([]);
-      setHasMore(true);
-      setLogError(null);
-      commitDiffCache.current.clear();
-      setSelectedCommit(null);
-      setSelectedCommitFile(null);
-      setCommitDiff(null);
-      loadMoreCommits();
-    }
-  }, [activeTab, loadStatus, loadMoreCommits]);
 
   /** 已加载的提交数量（用 ref 避免焦点回调拿到过期闭包） */
   const commitsLenRef = useRef(0);
@@ -542,6 +594,193 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
       setLogLoading(false);
     }
   }, []);
+
+  /** 工具栏：获取远程更新（git fetch）并刷新本地状态 */
+  const handleFetch = useCallback(async () => {
+    if (remoteBusy) return;
+    setRemoteBusy("fetch");
+    setError(null);
+    try {
+      await fetchChanges();
+      await loadStatus();
+      await refreshHistory();
+      setFolderRefreshKey((k) => k + 1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRemoteBusy(null);
+    }
+  }, [remoteBusy, loadStatus, refreshHistory]);
+
+  /** 关闭下拉菜单：点击菜单外面时收起 */
+  useEffect(() => {
+    if (!toolMenuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if ((e.target as HTMLElement | null)?.closest(".toolbar-menu-wrap")) return;
+      setToolMenuOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [toolMenuOpen]);
+
+  const openToolDialog = useCallback((action: "branch" | "tag" | "stash" | "stashes") => {
+    setToolMenuOpen(false);
+    setToolAction(action);
+    setToolInput("");
+    setToolError(null);
+
+    // 贮藏列表：打开时即时拉取
+    if (action === "stashes") {
+      setStashes([]);
+      setToolBusy(true);
+      getStashList()
+        .then((entries) => setStashes(entries))
+        .catch((e) => setToolError(e instanceof Error ? e.message : String(e)))
+        .finally(() => setToolBusy(false));
+    }
+  }, []);
+
+  /** 应用 / 恢复贮藏：keepRecord 为 true 时用 apply（保留记录），否则用 pop（成功后删除） */
+  const handleApplyStash = useCallback(
+    async (index: number, keepRecord: boolean) => {
+      if (toolBusy) return;
+      setToolBusy(true);
+      setToolError(null);
+      try {
+        if (keepRecord) {
+          await applyStash(index);
+        } else {
+          await popStash(index);
+        }
+        setSelectedFile(null);
+        setDiff(null);
+        setRightPanelMode("diff");
+        await loadStatus();
+        setFolderRefreshKey((k) => k + 1);
+        setStashes(await getStashList());
+      } catch (e) {
+        setToolError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setToolBusy(false);
+      }
+    },
+    [toolBusy, loadStatus],
+  );
+
+  /** 删除单条贮藏 / 清空全部（二次确认后执行） */
+  const handleStashDelete = useCallback(async () => {
+    if (!stashConfirm || toolBusy) return;
+    setToolBusy(true);
+    setToolError(null);
+    try {
+      if (stashConfirm.type === "drop") {
+        await dropStash(stashConfirm.index);
+      } else {
+        await clearStashes();
+      }
+      setStashConfirm(null);
+      setStashes(await getStashList());
+    } catch (e) {
+      setStashConfirm(null);
+      setToolError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setToolBusy(false);
+    }
+  }, [stashConfirm, toolBusy]);
+
+  /** 打开/关闭分支下拉，打开时拉取分支列表 */
+  const toggleBranchMenu = useCallback(() => {
+    if (branchMenuOpen) {
+      setBranchMenuOpen(false);
+      return;
+    }
+    setBranchMenuOpen(true);
+    getBranches()
+      .then((list) => setBranches(list))
+      .catch(() => setBranches(null));
+  }, [branchMenuOpen]);
+
+  useEffect(() => {
+    if (!branchMenuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if ((e.target as HTMLElement | null)?.closest(".branch-switcher")) return;
+      setBranchMenuOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [branchMenuOpen]);
+
+  /** 切换本地/远程分支 */
+  const handleCheckoutBranch = useCallback(
+    async (name: string, isRemote: boolean) => {
+      if (branchBusy || name === repo.branch) {
+        setBranchMenuOpen(false);
+        return;
+      }
+      setBranchMenuOpen(false);
+      setBranchBusy(true);
+      setError(null);
+      try {
+        await checkoutBranch(name, isRemote);
+        setSelectedFile(null);
+        setDiff(null);
+        setRightPanelMode("diff");
+        await loadStatus();
+        await refreshHistory();
+        setFolderRefreshKey((k) => k + 1);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBranchBusy(false);
+      }
+    },
+    [branchBusy, repo.branch, loadStatus, refreshHistory],
+  );
+
+  const closeToolDialog = useCallback(() => {
+    if (toolBusy) return;
+    setToolAction(null);
+    setToolError(null);
+  }, [toolBusy]);
+
+  /** 新建分支 / 新建标签 / 贮藏的提交入口 */
+  const handleToolSubmit = useCallback(async () => {
+    if (!toolAction || toolBusy) return;
+    const value = toolInput.trim();
+    if ((toolAction === "branch" || toolAction === "tag") && !value) {
+      setToolError(toolAction === "branch" ? "请输入分支名称" : "请输入标签名称");
+      return;
+    }
+
+    setToolBusy(true);
+    setToolError(null);
+    try {
+      if (toolAction === "branch") {
+        await createBranch(value, true);
+        // 切换分支后当前分支信息会变化，重新打开仓库以同步徽标与文件
+        const info = await openRepository(repo.path);
+        saveCurrentRepo(info);
+        onRepoUpdate(info);
+        await loadStatus();
+        await refreshHistory();
+        setFolderRefreshKey((k) => k + 1);
+      } else if (toolAction === "tag") {
+        await createTag(value);
+      } else if (toolAction === "stash") {
+        await stashChanges(value || undefined);
+        setSelectedFile(null);
+        setDiff(null);
+        setRightPanelMode("diff");
+        await loadStatus();
+        setFolderRefreshKey((k) => k + 1);
+      }
+      setToolAction(null);
+    } catch (e) {
+      setToolError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setToolBusy(false);
+    }
+  }, [toolAction, toolBusy, toolInput, repo.path, onRepoUpdate, loadStatus, refreshHistory]);
 
   /** 提交暂存区内容 */
   const handleCommit = useCallback(async () => {
@@ -582,6 +821,40 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
     }
   }, [syncing, loadStatus, refreshHistory]);
 
+  /** 工具栏：拉取远程变更 */
+  const handlePull = useCallback(async () => {
+    if (remoteBusy) return;
+    setRemoteBusy("pull");
+    setError(null);
+    try {
+      await pullChanges();
+      await loadStatus();
+      await refreshHistory();
+      setFolderRefreshKey((k) => k + 1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRemoteBusy(null);
+    }
+  }, [remoteBusy, loadStatus, refreshHistory]);
+
+  /** 工具栏：推送本地提交 */
+  const handlePush = useCallback(async () => {
+    if (remoteBusy) return;
+    setRemoteBusy("push");
+    setError(null);
+    try {
+      await pushChanges();
+      await loadStatus();
+      await refreshHistory();
+      setFolderRefreshKey((k) => k + 1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRemoteBusy(null);
+    }
+  }, [remoteBusy, loadStatus, refreshHistory]);
+
   // ── 窗口回到顶层时自动刷新：变更文件 + 历史记录 + 文件夹目录 ─────────
   const lastAutoRefreshRef = useRef(0);
   const handleAutoRefreshRef = useRef<() => void>(() => {});
@@ -602,94 +875,253 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
     return () => window.removeEventListener("focus", handleFocus);
   }, []);
 
-  const handleSwitchRepo = useCallback(() => {
-    onCloseRepo();
-  }, [onCloseRepo]);
-
-  const repoName = repo.name || repo.path.split(/[\\\/]/).pop() || repo.path;
   const changesCount = status ? status.staged.length + status.unstaged.length : 0;
   // 暂存区为空且本地领先远程时，主按钮切换为「同步到远程」
   const showSync = (syncStatus?.ahead ?? 0) > 0 && (status?.staged.length ?? 0) === 0;
 
   return (
-    <div className="app">
+    <div className="app-shell">
+      <WindowResizeHandles />
+      <WindowControls />
+
+      <div className="app">
+      <ProjectSidebar
+        repos={recentRepos}
+        currentRepoPath={repo.path}
+        status={status}
+        selectedPath={selectedFolderFile?.fullPath ?? null}
+        refreshKey={folderRefreshKey}
+        onSwitchRepo={handleOpenRecentRepo}
+        onOpenFile={handleProjectFileClick}
+        onOpenOther={handleOpenOtherRepo}
+        onRemove={handleRemoveRecentRepo}
+      />
+
+      <div className="app-main">
       {/* ── Toolbar (clean, global actions only) ──────────────────── */}
-      <div className="toolbar">
-        {/* 仓库切换器：点击展开最近仓库列表 */}
-        <div className="repo-switcher" ref={repoMenuRef}>
+      <div className="toolbar" data-tauri-drag-region>
+        <div className="branch-switcher">
           <button
-            className={`toolbar-repo-badge ${repoMenuOpen ? "open" : ""}`}
-            onClick={() => setRepoMenuOpen((v) => !v)}
-            title={repo.path}
+            type="button"
+            className={`toolbar-branch-badge ${repo.is_detached ? "detached" : ""}`}
+            onClick={toggleBranchMenu}
+            disabled={branchBusy}
+            title={repo.is_detached ? "Detached HEAD，点击切换分支" : `分支: ${repo.branch}，点击切换`}
           >
-            <RepoAvatar repoName={repoName} repoPath={repo.path} size={16} />
-            <span className="toolbar-repo-name">{repoName}</span>
-            <ChevronDown
-              size={13}
-              style={{ flexShrink: 0, opacity: 0.6, transition: "transform 0.15s", transform: repoMenuOpen ? "rotate(180deg)" : "none" }}
-            />
+            {branchBusy ? (
+              <Loader2 size={13} className="spin" style={{ flexShrink: 0 }} />
+            ) : (
+              <GitBranch size={13} style={{ flexShrink: 0 }} />
+            )}
+            <span>{repo.is_detached ? "Detached HEAD" : repo.branch}</span>
+            <ChevronDown size={12} style={{ flexShrink: 0, opacity: 0.75 }} />
           </button>
 
-          {repoMenuOpen && (
-            <div className="repo-switcher-dropdown">
-              <div className="repo-switcher-section-title">最近打开</div>
-              {recentRepos.length === 0 ? (
-                <div className="repo-switcher-empty">暂无最近仓库</div>
+          {branchMenuOpen && (
+            <div className="branch-menu">
+              <div className="branch-menu-section">本地分支</div>
+              {branches === null ? (
+                <div className="branch-menu-loading">
+                  <Loader2 size={12} className="spin" /> 正在读取分支...
+                </div>
+              ) : branches.local.length === 0 ? (
+                <div className="branch-menu-empty">没有本地分支</div>
               ) : (
-                recentRepos.map((r) => (
-                  <div
-                    key={r.path}
-                    className={`repo-switcher-item ${r.path === repo.path ? "current" : ""}`}
-                    onClick={() => r.path !== repo.path && handleOpenRecentRepo(r.path)}
-                    title={r.path}
-                  >
-                    <RepoAvatar repoName={r.name} repoPath={r.path} size={18} />
-                    <div className="repo-switcher-item-info">
-                      <div className="repo-switcher-item-name">{r.name}</div>
-                      <div className="repo-switcher-item-path">{r.path}</div>
-                    </div>
-                    {r.path === repo.path && (
-                      <span className="repo-switcher-current-tag">当前</span>
-                    )}
+                branches.local.map((name) => {
+                  const isCurrent = name === branches.current || (!branches.current && name === repo.branch);
+                  return (
                     <button
-                      className="repo-switcher-remove"
-                      onClick={(e) => handleRemoveRecent(e, r.path)}
-                      title="从最近列表移除"
+                      key={`local:${name}`}
+                      type="button"
+                      className={`branch-menu-item ${isCurrent ? "current" : ""}`}
+                      onClick={() => handleCheckoutBranch(name, false)}
                     >
-                      <X size={13} />
+                      {isCurrent ? (
+                        <Check size={12} style={{ flexShrink: 0 }} />
+                      ) : (
+                        <GitBranch size={12} style={{ flexShrink: 0, opacity: 0.6 }} />
+                      )}
+                      <span className="branch-menu-name">{name}</span>
+                      {isCurrent && <span className="branch-menu-tag">当前</span>}
                     </button>
-                  </div>
-                ))
+                  );
+                })
               )}
-              <div className="repo-switcher-divider" />
-              <button className="repo-switcher-other" onClick={handleOpenOtherRepo}>
-                <FolderOpen size={14} />
-                <span>打开其他仓库...</span>
-              </button>
+
+              <div className="branch-menu-section">远程分支</div>
+              {branches === null ? null : branches.remote.length === 0 ? (
+                <div className="branch-menu-empty">没有远程分支</div>
+              ) : (
+                branches.remote.map((name) => {
+                  const shortName = name.split("/").slice(1).join("/");
+                  const hasLocal = branches.local.includes(shortName);
+                  return (
+                    <button
+                      key={`remote:${name}`}
+                      type="button"
+                      className="branch-menu-item remote"
+                      onClick={() => handleCheckoutBranch(name, true)}
+                    >
+                      <GitBranch size={12} style={{ flexShrink: 0, opacity: 0.6 }} />
+                      <span className="branch-menu-name">{name}</span>
+                      {hasLocal && <span className="branch-menu-tag subtle">本地已有</span>}
+                    </button>
+                  );
+                })
+              )}
             </div>
           )}
         </div>
 
-        <div
-          className={`toolbar-branch-badge ${repo.is_detached ? "detached" : ""}`}
-          title={repo.is_detached ? "Detached HEAD" : `分支: ${repo.branch}`}
-        >
-          <GitBranch size={13} style={{ flexShrink: 0 }} />
-          <span>{repo.is_detached ? "Detached HEAD" : repo.branch}</span>
-        </div>
-
-        <div className="toolbar-spacer" />
-
-        <div className="toolbar-actions">
+        <div className="toolbar-branch-actions">
           <button
             className="toolbar-btn"
-            onClick={handleRefresh}
-            disabled={activeTab === "changes" ? loading : logLoading}
-            title={activeTab === "changes" ? "刷新仓库变更状态" : "刷新提交记录"}
+            onClick={handlePull}
+            disabled={remoteBusy !== null}
+            title={
+              syncStatus && syncStatus.behind > 0
+                ? `拉取远程变更 (Pull) · 落后 ${syncStatus.behind} 个提交`
+                : "拉取远程变更 (Pull)"
+            }
           >
-            <RefreshCw size={14} className={(activeTab === "changes" ? loading : logLoading) ? "spin" : ""} />
-            <span>刷新</span>
+            {remoteBusy === "pull" ? (
+              <Loader2 size={14} className="spin" />
+            ) : (
+              <Download size={14} />
+            )}
+            <span>拉取</span>
           </button>
+          <button
+            className="toolbar-btn"
+            onClick={handlePush}
+            disabled={
+              remoteBusy !== null ||
+              (syncStatus !== null && (!syncStatus.has_upstream || syncStatus.ahead === 0))
+            }
+            title={
+              syncStatus && !syncStatus.has_upstream
+                ? "当前分支未关联远程分支，无法推送"
+                : syncStatus && syncStatus.ahead === 0
+                  ? "没有待推送的本地提交"
+                  : syncStatus && syncStatus.ahead > 0
+                    ? `推送本地提交 (Push) · 领先 ${syncStatus.ahead} 个提交`
+                    : "推送本地提交 (Push)"
+            }
+          >
+            {remoteBusy === "push" ? (
+              <Loader2 size={14} className="spin" />
+            ) : (
+              <Upload size={14} />
+            )}
+            <span>推送</span>
+          </button>
+          <button
+            className="toolbar-btn"
+            onClick={handleFetch}
+            disabled={remoteBusy !== null}
+            title="获取远程更新 (Fetch)"
+          >
+            {remoteBusy === "fetch" ? (
+              <Loader2 size={14} className="spin" />
+            ) : (
+              <RotateCw size={14} />
+            )}
+            <span>获取</span>
+          </button>
+
+          <div className="toolbar-menu-wrap">
+            <button
+              className="toolbar-btn"
+              onClick={() => setToolMenuOpen((v) => !v)}
+              title="更多 Git 操作"
+              aria-haspopup="menu"
+              aria-expanded={toolMenuOpen}
+            >
+              <MoreHorizontal size={14} />
+              <span>更多</span>
+            </button>
+            {toolMenuOpen && (
+              <div className="toolbar-menu" role="menu">
+                <button
+                  type="button"
+                  className="toolbar-menu-item"
+                  role="menuitem"
+                  onClick={() => openToolDialog("branch")}
+                >
+                  <GitBranch size={13} />
+                  <span>新建分支</span>
+                </button>
+                <button
+                  type="button"
+                  className="toolbar-menu-item"
+                  role="menuitem"
+                  onClick={() => openToolDialog("tag")}
+                >
+                  <Tag size={13} />
+                  <span>新建标签</span>
+                </button>
+                <button
+                  type="button"
+                  className="toolbar-menu-item"
+                  role="menuitem"
+                  disabled={changesCount === 0}
+                  title={changesCount === 0 ? "当前没有可贮藏的变更" : "贮藏当前所有变更"}
+                  onClick={() => openToolDialog("stash")}
+                >
+                  <Archive size={13} />
+                  <span>贮藏变更</span>
+                </button>
+                <button
+                  type="button"
+                  className="toolbar-menu-item"
+                  role="menuitem"
+                  title="查看并恢复已贮藏的变更"
+                  onClick={() => openToolDialog("stashes")}
+                >
+                  <ArchiveRestore size={13} />
+                  <span>贮藏列表 / 恢复</span>
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="toolbar-spacer" data-tauri-drag-region />
+
+        <div className="toolbar-actions">
+          <div className="open-with-switcher vscode-accent" ref={openMenuRef}>
+            <button
+              className="toolbar-btn open-with-main"
+              onClick={handleOpenProject}
+              title="用 VS Code 打开当前项目"
+            >
+              <ExternalLink size={14} />
+              <span>VS Code</span>
+            </button>
+            <button
+              className={`toolbar-btn open-with-caret ${openMenuOpen ? "open" : ""}`}
+              onClick={() => setOpenMenuOpen((v) => !v)}
+              title="选择打开方式"
+            >
+              <ChevronDown size={12} />
+            </button>
+
+            {openMenuOpen && (
+              <div className="open-with-menu">
+                <div className="open-with-menu-title">打开方式</div>
+                {OPEN_METHODS.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className="open-with-menu-item"
+                    onClick={() => handleOpenOnce(item.id)}
+                  >
+                    <span>{item.label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <button
             className="toolbar-btn"
             onClick={handleOpenTerminal}
@@ -697,14 +1129,6 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
           >
             <Terminal size={14} />
             <span>终端</span>
-          </button>
-          <button
-            className="toolbar-btn"
-            onClick={handleSwitchRepo}
-            title="切换或打开其他仓库"
-          >
-            <FolderSync size={14} />
-            <span>切换仓库</span>
           </button>
           {onOpenSettings && (
             <button
@@ -736,7 +1160,6 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                   setFilter("");
                 }}
               >
-                <Diff size={14} />
                 <span>变更</span>
                 {changesCount > 0 && (
                   <span className="sidebar-tab-badge">{changesCount}</span>
@@ -752,21 +1175,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                   setFilter("");
                 }}
               >
-                <GitCommit size={14} />
                 <span>历史</span>
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeTab === "folders"}
-                className={`sidebar-tab ${activeTab === "folders" ? "active" : ""}`}
-                onClick={() => {
-                  setActiveTab("folders");
-                  setFilter("");
-                }}
-              >
-                <FolderOpen size={14} />
-                <span>文件夹</span>
               </button>
             </div>
           </div>
@@ -825,9 +1234,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
               <input
                 type="text"
                 className="sidebar-search-input"
-                placeholder={
-                  activeTab === "folders" ? "搜索文件或目录..." : "搜索提交记录、作者、哈希..."
-                }
+                placeholder="搜索提交记录、作者、哈希..."
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
               />
@@ -874,21 +1281,10 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
               />
             </>
           )}
-
-          {activeTab === "folders" && (
-            <FolderTree
-              repoPath={repo.path}
-              filter={filter}
-              status={status}
-              refreshKey={folderRefreshKey}
-              onSelectFile={handleFolderFileSelect}
-              selectedPath={selectedFolderFile?.fullPath ?? null}
-            />
-          )}
         </div>
 
         {/* ── Content Area: Changes Mode vs History Mode ─────────── */}
-        {activeTab === "changes" && (
+        {activeTab === "changes" && !selectedFolderFile && (
           <div className="diff-viewer">
             {rightPanelMode === "all" && status && <AllChangesView status={status} />}
 
@@ -947,12 +1343,13 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                 file={selectedFile}
                 view={diffView}
                 onViewChange={setDiffView}
+                repoPath={repo.path}
               />
             )}
           </div>
         )}
 
-        {activeTab === "history" && (
+        {activeTab === "history" && !selectedFolderFile && (
           <div className="history-main-content">
             {/* Column 2 in History Mode: Commit details & changed files */}
             <div className="history-detail-panel">
@@ -1017,26 +1414,181 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
           </div>
         )}
 
-        {activeTab === "folders" && (
+        {selectedFolderFile && (
           <div className="diff-viewer">
-            {!selectedFolderFile ? (
-              <div className="empty-state">
-                <div className="empty-state-icon-wrapper">
-                  <FolderOpen size={32} strokeWidth={1.5} />
-                </div>
-                <div className="empty-state-text">浏览目录结构</div>
-                <div className="empty-state-sub">左侧文件夹树支持展开折叠、搜索过滤，点击文件即可预览</div>
-              </div>
-            ) : (
-              <FilePreview
-                fullPath={selectedFolderFile.fullPath}
-                relPath={selectedFolderFile.relPath}
-                change={selectedFolderChange}
-              />
-            )}
+            <div className="changes-file-preview-bar">
+              <span className="preview-file-path" title={selectedFolderFile.relPath}>
+                {selectedFolderFile.relPath}
+              </span>
+              <button
+                type="button"
+                className="changes-file-preview-switch"
+                onClick={() => setSelectedFolderFile(null)}
+                title="关闭预览"
+              >
+                <X size={13} />
+                <span>关闭</span>
+              </button>
+            </div>
+            <FilePreview
+              fullPath={selectedFolderFile.fullPath}
+              relPath={selectedFolderFile.relPath}
+              change={selectedFolderChange}
+            />
           </div>
         )}
       </div>
+      </div>
+
+      {/* ── 新建分支 / 新建标签 / 贮藏 输入弹窗 ───────────────────── */}
+      {toolAction && (
+        <div className="confirm-overlay" onClick={closeToolDialog}>
+          <div
+            className="confirm-dialog"
+            role="dialog"
+            aria-modal="true"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="confirm-header">
+              {toolAction === "branch" ? (
+                <GitBranch size={16} className="confirm-icon" style={{ color: "var(--accent-color)" }} />
+              ) : toolAction === "tag" ? (
+                <Tag size={16} className="confirm-icon" style={{ color: "var(--accent-color)" }} />
+              ) : toolAction === "stash" ? (
+                <Archive size={16} className="confirm-icon" style={{ color: "var(--accent-color)" }} />
+              ) : (
+                <ArchiveRestore size={16} className="confirm-icon" style={{ color: "var(--accent-color)" }} />
+              )}
+              <span className="confirm-title">
+                {toolAction === "branch"
+                  ? "新建分支"
+                  : toolAction === "tag"
+                    ? "新建标签"
+                    : toolAction === "stash"
+                      ? "贮藏变更"
+                      : "贮藏列表"}
+              </span>
+            </div>
+            {toolAction === "stashes" ? (
+              <div className="confirm-body">
+                <div className="dialog-hint">
+                  选择一条贮藏记录恢复（pop），恢复后该记录会从列表中移除。
+                </div>
+                {toolBusy && stashes.length === 0 ? (
+                  <div className="stash-empty">
+                    <Loader2 size={14} className="spin" /> 正在读取贮藏记录...
+                  </div>
+                ) : stashes.length === 0 ? (
+                  <div className="stash-empty">当前没有贮藏记录</div>
+                ) : (
+                  <div className="stash-list">
+                    {stashes.map((entry) => (
+                      <div className="stash-item" key={entry.ref_name}>
+                        <div className="stash-item-info">
+                          <div className="stash-item-message">{entry.message || entry.ref_name}</div>
+                          <div className="stash-item-meta">
+                            {entry.ref_name} · {entry.date}
+                          </div>
+                        </div>
+                        <div className="stash-item-actions">
+                          <button
+                            type="button"
+                            className="stash-action-btn"
+                            disabled={toolBusy}
+                            title="应用贮藏，保留该记录 (git stash apply)"
+                            onClick={() => handleApplyStash(entry.index, true)}
+                          >
+                            应用
+                          </button>
+                          <button
+                            type="button"
+                            className="stash-action-btn primary"
+                            disabled={toolBusy}
+                            title="应用贮藏并删除该记录 (git stash pop)"
+                            onClick={() => handleApplyStash(entry.index, false)}
+                          >
+                            <ArchiveRestore size={11} />
+                            恢复
+                          </button>
+                          <button
+                            type="button"
+                            className="stash-action-btn danger"
+                            disabled={toolBusy}
+                            title="删除该贮藏记录，不应用到工作区 (git stash drop)"
+                            onClick={() => setStashConfirm({ type: "drop", index: entry.index })}
+                          >
+                            <Trash2 size={11} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {toolError && <div className="dialog-error">{toolError}</div>}
+              </div>
+            ) : (
+              <div className="confirm-body">
+                <div className="dialog-hint">
+                  {toolAction === "branch"
+                    ? "将基于当前提交创建新分支并立即切换过去。"
+                    : toolAction === "tag"
+                      ? "将在当前提交上创建标签。名称重复或仓库尚无提交时会失败。"
+                      : "将贮藏当前所有变更（含未跟踪文件），并清空工作区。"}
+                </div>
+                <input
+                  autoFocus
+                  className="dialog-input"
+                  type="text"
+                  value={toolInput}
+                  spellCheck={false}
+                  placeholder={
+                    toolAction === "branch"
+                      ? "分支名称，例如 feature/login"
+                      : toolAction === "tag"
+                        ? "标签名称，例如 v1.0.0"
+                        : "贮藏说明（可选）"
+                  }
+                  onChange={(e) => setToolInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleToolSubmit();
+                    if (e.key === "Escape") closeToolDialog();
+                  }}
+                />
+                {toolError && <div className="dialog-error">{toolError}</div>}
+              </div>
+            )}
+            <div className="confirm-actions">
+              {toolAction === "stashes" && stashes.length > 0 && (
+                <button
+                  className="confirm-btn confirm-btn-danger stash-clear-btn"
+                  onClick={() => setStashConfirm({ type: "clear" })}
+                  disabled={toolBusy}
+                >
+                  清空全部
+                </button>
+              )}
+              <button className="confirm-btn confirm-btn-cancel" onClick={closeToolDialog} disabled={toolBusy}>
+                {toolAction === "stashes" ? "关闭" : "取消"}
+              </button>
+              {toolAction !== "stashes" && (
+                <button
+                  className="confirm-btn confirm-btn-primary"
+                  onClick={handleToolSubmit}
+                  disabled={toolBusy || (toolAction !== "stash" && !toolInput.trim())}
+                >
+                  {toolBusy
+                    ? "处理中..."
+                    : toolAction === "branch"
+                      ? "创建并切换"
+                      : toolAction === "tag"
+                        ? "创建标签"
+                        : "贮藏"}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Confirm Dialog ───────────────────────────────────────── */}
       {revertPending && (() => {
@@ -1068,6 +1620,21 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
           onCancel={() => setConfirmDiscardAll(false)}
         />
       )}
+      {stashConfirm && (
+        <ConfirmDialog
+          title={stashConfirm.type === "clear" ? "确认清空全部贮藏" : "确认删除贮藏记录"}
+          message={
+            stashConfirm.type === "clear"
+              ? `将删除全部 ${stashes.length} 条贮藏记录，且不会应用到工作区。\n\n此操作不可恢复。`
+              : `将删除 ${stashes.find((s) => s.index === stashConfirm.index)?.ref_name ?? `stash@{${stashConfirm.index}}`}，且不会应用到工作区。\n\n此操作不可恢复。`
+          }
+          confirmText={stashConfirm.type === "clear" ? "清空全部" : "删除"}
+          cancelText="取消"
+          onConfirm={handleStashDelete}
+          onCancel={() => setStashConfirm(null)}
+        />
+      )}
+      </div>
     </div>
   );
 }

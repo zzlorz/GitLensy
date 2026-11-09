@@ -17,6 +17,24 @@ pub struct SyncStatus {
     pub behind: usize,
 }
 
+/// 一条贮藏记录
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StashEntry {
+    pub index: usize,
+    pub ref_name: String,
+    pub message: String,
+    pub date: String,
+}
+
+/// 本地 / 远程分支列表
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BranchList {
+    /// 当前分支名；detached HEAD 时为空
+    pub current: String,
+    pub local: Vec<String>,
+    pub remote: Vec<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FileStatus {
@@ -148,6 +166,8 @@ pub struct CommitInfo {
     pub date_relative: String,
     /// Number of parents (0 = root, 2+ = merge)
     pub parent_count: usize,
+    /// Full parent SHAs in order (first parent first)
+    pub parents: Vec<String>,
 }
 
 /// A file entry in a commit's changeset.

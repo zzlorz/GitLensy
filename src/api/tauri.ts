@@ -8,6 +8,8 @@ import type {
   CommitInfo,
   CommitFile,
   SyncStatus,
+  StashEntry,
+  BranchList,
 } from "../types";
 
 // Repository commands
@@ -34,6 +36,11 @@ export async function getStatus(): Promise<GitStatus> {
     }
   }
   return status;
+}
+
+/** 指定仓库的变更文件数量（去重后），用于项目侧边栏的计数徽标 */
+export async function getRepoChangeCount(repoPath: string): Promise<number> {
+  return invoke<number>("get_repo_change_count", { path: repoPath });
 }
 
 export async function getFileDiff(
@@ -110,6 +117,42 @@ export async function openTerminal(): Promise<void> {
   return invoke<void>("open_terminal");
 }
 
+// 外部编辑器设置（默认 VS Code: code）
+const EDITOR_KEY = "gitlensy:editor";
+
+/** 读取用户配置的外部编辑器命令，未配置时为 code */
+export function getPreferredEditor(): string {
+  try {
+    const saved = localStorage.getItem(EDITOR_KEY);
+    return saved && saved.trim() ? saved.trim() : "code";
+  } catch {
+    return "code";
+  }
+}
+
+/** 保存外部编辑器命令 */
+export function setPreferredEditor(editor: string): void {
+  const value = editor.trim() || "code";
+  localStorage.setItem(EDITOR_KEY, value);
+}
+
+/** 用外部编辑器打开目录或文件（不传 editor 时使用设置中的默认值） */
+export async function openInEditor(path: string, editor?: string): Promise<void> {
+  return invoke<void>("open_in_editor", { path, editor: editor ?? getPreferredEditor() });
+}
+
+/** 「打开方式」：editor（VS Code 等外部编辑器）/ explorer（资源管理器）/ system（系统「打开方式」对话框） */
+export type OpenMethod = "editor" | "explorer" | "system";
+
+/** 按指定方式打开项目或文件 */
+export async function openPath(path: string, method: OpenMethod): Promise<void> {
+  return invoke<void>("open_with_method", {
+    path,
+    method,
+    editor: getPreferredEditor(),
+  });
+}
+
 /** 撤销单个文件的变更。scope: "unstaged" | "staged" | "all" */
 export async function revertFile(filePath: string, scope: string): Promise<void> {
   return invoke<void>("revert_file", { filePath, scope });
@@ -143,6 +186,71 @@ export async function getSyncStatus(): Promise<SyncStatus> {
 /** 同步到远程仓库（落后时先快进拉取，再推送） */
 export async function syncChanges(): Promise<void> {
   return invoke<void>("sync_changes");
+}
+
+/** 拉取远程变更（仅快进） */
+export async function pullChanges(): Promise<void> {
+  return invoke<void>("pull_changes");
+}
+
+/** 获取远程更新（git fetch，不合并到本地） */
+export async function fetchChanges(): Promise<void> {
+  return invoke<void>("fetch_changes");
+}
+
+/** 推送本地提交到远程 */
+export async function pushChanges(): Promise<void> {
+  return invoke<void>("push_changes");
+}
+
+/** 新建分支；checkout 为 true 时创建并切换 */
+export async function createBranch(name: string, checkout: boolean): Promise<void> {
+  return invoke<void>("create_branch", { name, checkout });
+}
+
+/** 新建标签；message 非空时创建附注标签 */
+export async function createTag(name: string, message?: string): Promise<void> {
+  return invoke<void>("create_tag", { name, message: message ?? null });
+}
+
+/** 贮藏当前工作区变更（含未跟踪文件） */
+export async function stashChanges(message?: string): Promise<void> {
+  return invoke<void>("stash_changes", { message: message ?? null });
+}
+
+/** 列出当前仓库的贮藏记录 */
+export async function getStashList(): Promise<StashEntry[]> {
+  return invoke<StashEntry[]>("get_stash_list");
+}
+
+/** 恢复指定序号的贮藏（pop） */
+export async function popStash(index: number): Promise<void> {
+  return invoke<void>("pop_stash", { index });
+}
+
+/** 应用指定序号的贮藏（apply），保留记录 */
+export async function applyStash(index: number): Promise<void> {
+  return invoke<void>("apply_stash", { index });
+}
+
+/** 删除指定序号的贮藏记录 */
+export async function dropStash(index: number): Promise<void> {
+  return invoke<void>("drop_stash", { index });
+}
+
+/** 清空全部贮藏记录 */
+export async function clearStashes(): Promise<void> {
+  return invoke<void>("clear_stashes");
+}
+
+/** 列出本地与远程分支 */
+export async function getBranches(): Promise<BranchList> {
+  return invoke<BranchList>("get_branches");
+}
+
+/** 切换分支；远程分支会自动创建同名本地分支并跟踪 */
+export async function checkoutBranch(name: string, isRemote: boolean): Promise<void> {
+  return invoke<void>("checkout_branch", { name, isRemote });
 }
 
 /** 动态同步更新原生窗口标题栏主题（暗色 / 亮色） */

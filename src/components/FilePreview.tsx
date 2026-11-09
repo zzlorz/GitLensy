@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { readTextFile, readFile, stat } from "@tauri-apps/plugin-fs";
-import { FileText, Image, Loader2, AlertTriangle, FileQuestion, X } from "lucide-react";
-import { getFileDiff } from "../api/tauri";
+import { FileText, Image, Loader2, AlertTriangle, FileQuestion, X, ExternalLink } from "lucide-react";
+import { getFileDiff, openInEditor } from "../api/tauri";
 import type { ChangedFile, DiffView, FileDiff } from "../types";
 import hljs from "highlight.js/lib/core";
 import javascript from "highlight.js/lib/languages/javascript";
@@ -511,6 +511,18 @@ export default function FilePreview({ fullPath, relPath, change }: Props) {
             </span>
           )}
           {isTruncated && <span className="file-preview-truncated-badge">已截断 (仅前 512KB)</span>}
+          <button
+            type="button"
+            className="file-preview-action"
+            title="在编辑器中打开文件"
+            onClick={() =>
+              openInEditor(fullPath).catch((err) =>
+                window.alert(err instanceof Error ? err.message : String(err))
+              )
+            }
+          >
+            <ExternalLink size={13} />
+          </button>
         </div>
       </div>
 
