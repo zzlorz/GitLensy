@@ -95,6 +95,8 @@ export default function ProjectSidebar({
   onOpenFile,
   onOpenOther,
   onRemove,
+  width,
+  onCollapsedChange,
 }: {
   repos: RecentRepo[];
   currentRepoPath: string;
@@ -105,10 +107,18 @@ export default function ProjectSidebar({
   onOpenFile: (repoPath: string, fullPath: string, relPath: string) => void;
   onOpenOther: () => void;
   onRemove: (path: string) => void;
+  /** 展开状态下的宽度（px），由父组件持久化 */
+  width?: number;
+  /** 折叠状态变化时通知父组件（用于隐藏拖拽手柄） */
+  onCollapsedChange?: (collapsed: boolean) => void;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [query, setQuery] = useState("");
   const [counts, setCounts] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    onCollapsedChange?.(collapsed);
+  }, [collapsed, onCollapsedChange]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -234,7 +244,7 @@ export default function ProjectSidebar({
   }
 
   return (
-    <div className="project-sidebar">
+    <div className="project-sidebar" style={width !== undefined ? { width } : undefined}>
       <div className="project-sidebar-header">
         <img className="project-sidebar-logo" src="/app-icon.png" alt="GitLensy" draggable={false} />
         <span className="project-sidebar-title">GitLensy</span>

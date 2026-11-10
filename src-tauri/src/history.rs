@@ -244,7 +244,61 @@ pub fn get_commit_file_diff<P: AsRef<Path>>(
     validate_hash(hash)?;
     let base = commit_base(repo_path, hash)?;
 
-    let mut args: Vec<&str> = vec!["diff", "--no-color", "-M", &base, hash, "--"];
+    diff_between(repo_path, &base, hash, file_path, old_path)
+}
+
+/// 获取两个提交之间的文件列表（用于提交间对比）。
+pub fn get_compare_files<P: AsRef<Path>>(
+    repo_path: P,
+    from_hash: &str,
+    to_hash: &str,
+) -> AppResult<Vec<CommitFile>> {
+    let repo_path = repo_path.as_ref();
+
+    validate_hash(from_hash)?;
+    validate_hash(to_hash)?;
+    ensure_commit(repo_path, from_hash)?;
+    ensure_commit(repo_path, to_hash)?;
+
+    let name_status = run_git_bytes(
+        repo_path,
+        &["diff", "--name-status", "-M", "-z", from_hash, to_hash],
+    )?;
+    let numstat = run_git_bytes(
+        repo_path,
+        &["diff", "--numstat", "-M", "-z", from_hash, to_hash],
+    )?;
+
+    Ok(parse_commit_files(&numstat, &name_status))
+}
+
+/// 获取两个提交之间单个文件的 diff（用于提交间对比）。
+pub fn get_compare_file_diff<P: AsRef<Path>>(
+    repo_path: P,
+    from_hash: &str,
+    to_hash: &str,
+    file_path: &str,
+    old_path: Option<&str>,
+) -> AppResult<FileDiff> {
+    let repo_path = repo_path.as_ref();
+
+    validate_hash(from_hash)?;
+    validate_hash(to_hash)?;
+    ensure_commit(repo_path, from_hash)?;
+    ensure_commit(repo_path, to_hash)?;
+
+    diff_between(repo_path, from_hash, to_hash, file_path, old_path)
+}
+
+/// 通用：在 base 与 target 之间生成单文件 diff。
+fn diff_between(
+    repo_path: &Path,
+    base: &str,
+    target: &str,
+    file_path: &str,
+    old_path: Option<&str>,
+) -> AppResult<FileDiff> {
+    let mut args: Vec<&str> = vec!["diff", "--no-color", "-M", base, target, "--"];
     match old_path {
         Some(old) if !old.is_empty() && old != file_path => {
             args.push(old);
@@ -260,6 +314,15 @@ pub fn get_commit_file_diff<P: AsRef<Path>>(
     }
 
     parse_unified_diff(&diff_bytes, file_path)
+}
+
+fn ensure_commit(repo_path: &Path, hash: &str) -> AppResult<()> {
+    run_git_string(
+        repo_path,
+        &["rev-parse", "--verify", &format!("{}^{{commit}}", hash)],
+    )
+    .map_err(|_| AppError::GitCommand(format!("Unknown commit: {}", hash)))?;
+    Ok(())
 }
 
 fn empty_diff(path: &str) -> FileDiff {
@@ -507,6 +570,53 @@ mod real_repo_tests {
 
     fn write(dir: &Path, name: &str, contents: &str) {
         fs::write(dir.join(name), contents).expect("failed to write file");
+    }
+
+    #[test]
+    fn compares_two_commits_end_to_end() {
+        let Some(repo) = init_repo() else { return };
+        let dir = &repo.0;
+
+        write(dir, "a.txt", "one\ntwo\n");
+        git(dir, &["add", "-A"]);
+        git(dir, &["commit", "-m", "first"]);
+        let first = git(dir, &["rev-parse", "HEAD"]);
+
+        write(dir, "a.txt", "one\ntwo changed\n");
+        git(dir, &["add", "-A"]);
+        git(dir, &["commit", "-m", "second"]);
+        let second = git(dir, &["rev-parse", "HEAD"]);
+
+        write(dir, "a.txt", "one\ntwo changed\nthree\n");
+        write(dir, "b.txt", "brand new\n");
+        git(dir, &["add", "-A"]);
+        git(dir, &["commit", "-m", "third"]);
+        let third = git(dir, &["rev-parse", "HEAD"]);
+
+        // first..third：a.txt 被修改、b.txt 新增
+        let files = get_compare_files(dir, &first, &third).expect("compare files");
+        assert_eq!(files.len(), 2);
+        let a = files.iter().find(|f| f.path == "a.txt").expect("a.txt");
+        assert_eq!(a.status, FileStatus::Modified);
+        assert_eq!((a.additions, a.deletions), (2, 1));
+        let b = files.iter().find(|f| f.path == "b.txt").expect("b.txt");
+        assert_eq!(b.status, FileStatus::Added);
+
+        // 单文件 diff：包含新增与删除行
+        let diff = get_compare_file_diff(dir, &first, &third, "a.txt", None).expect("compare diff");
+        assert!(diff.hunks.iter().any(|h| h
+            .lines
+            .iter()
+            .any(|l| matches!(l.line_type, crate::models::DiffLineType::Add))));
+        assert!(diff.hunks.iter().any(|h| h
+            .lines
+            .iter()
+            .any(|l| matches!(l.line_type, crate::models::DiffLineType::Remove))));
+
+        // 反向对比：third..second 应当只删除 third 新增的 three 行
+        let reverse = get_compare_files(dir, &third, &second).expect("reverse compare");
+        let a_rev = reverse.iter().find(|f| f.path == "a.txt").expect("a.txt reverse");
+        assert_eq!((a_rev.additions, a_rev.deletions), (0, 1));
     }
 
     #[test]

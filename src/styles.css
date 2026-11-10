@@ -631,6 +631,66 @@ input {
   color: var(--text-muted);
 }
 
+/* 分支行：主按钮 + 悬停显示的操作按钮 */
+.branch-menu-row {
+  display: flex;
+  align-items: center;
+  border-radius: 6px;
+  transition: background-color 0.12s;
+}
+
+.branch-menu-row:hover {
+  background-color: var(--bg-hover);
+}
+
+.branch-menu-row .branch-menu-item {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+
+.branch-menu-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-right: 4px;
+  opacity: 0.38;
+  transition: opacity 0.12s;
+}
+
+.branch-menu-row:hover .branch-menu-actions,
+.branch-menu-row:focus-within .branch-menu-actions {
+  opacity: 1;
+}
+
+.branch-menu-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background-color 0.12s, color 0.12s;
+}
+
+.branch-menu-action:hover:not(:disabled) {
+  background-color: var(--bg-active);
+  color: var(--text-primary);
+}
+
+.branch-menu-action.danger:hover:not(:disabled) {
+  color: var(--deleted-color);
+}
+
+.branch-menu-action:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
 .toolbar-spacer {
   flex: 1;
 }
@@ -754,6 +814,23 @@ input {
   background-color: var(--accent-hover);
 }
 
+/* 工具栏按钮上的待推送 / 待拉取数量 */
+.toolbar-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background-color: var(--accent-color);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
 /* 工具栏「更多」下拉菜单 */
 .toolbar-menu-wrap {
   position: relative;
@@ -794,6 +871,12 @@ input {
   color: var(--text-muted);
 }
 
+.toolbar-menu-divider {
+  height: 1px;
+  margin: 4px 6px;
+  background-color: var(--border-subtle);
+}
+
 .spin {
   animation: spin 0.9s linear infinite;
 }
@@ -812,6 +895,7 @@ input {
 /* 最左侧项目侧边栏 */
 .project-sidebar {
   width: 200px;
+  max-width: 60vw;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -1086,9 +1170,9 @@ input {
 /* Sidebar */
 .sidebar {
   width: var(--sidebar-width);
+  max-width: 60vw;
   background-color: transparent;
   border-left: 1px solid var(--border-subtle);
-  border-right: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1297,9 +1381,13 @@ input {
 }
 
 .file-item.selected {
-  background-color: rgba(47, 129, 247, 0.15);
+  background-color: var(--added-bg);
   border-left-color: var(--accent-color);
   color: var(--text-primary);
+}
+
+.file-item.selected:hover {
+  background-color: var(--added-line-bg);
 }
 
 .file-badge {
@@ -2478,6 +2566,44 @@ input {
   gap: 8px;
 }
 
+/* 全局错误条：分支操作 / 提交操作失败时显示在工具栏下方 */
+.global-error-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  font-size: 12px;
+  color: var(--error-color);
+  background-color: var(--deleted-bg);
+  border-bottom: 1px solid rgba(248, 81, 73, 0.3);
+  flex-shrink: 0;
+}
+
+.global-error-bar > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.global-error-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--error-color);
+  cursor: pointer;
+}
+
+.global-error-close:hover {
+  background-color: rgba(248, 81, 73, 0.15);
+}
+
 .binary-notice {
   padding: 32px;
   text-align: center;
@@ -2571,6 +2697,11 @@ input {
   height: 100%;
 }
 
+.history-main-content > .empty-state {
+  flex: 1;
+  min-width: 0;
+}
+
 
 .history-commit-panel {
   width: 320px;
@@ -2626,8 +2757,53 @@ input {
 }
 
 .commit-item.selected {
-  background-color: rgba(47, 129, 247, 0.15);
+  background-color: var(--added-bg);
   border-left-color: var(--accent-color);
+}
+
+.commit-item.selected:hover {
+  background-color: var(--added-line-bg);
+}
+
+/* 提交间对比的基准提交 */
+.commit-item.compare-base {
+  background-color: rgba(224, 164, 88, 0.12);
+  border-left-color: var(--modified-color);
+}
+
+.commit-compare-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0.28;
+  transition: opacity 0.12s, background-color 0.12s, color 0.12s;
+}
+
+.commit-item:hover .commit-compare-btn {
+  opacity: 1;
+}
+
+.commit-compare-btn:focus-visible {
+  opacity: 1;
+}
+
+.commit-compare-btn:hover {
+  background-color: var(--bg-active);
+  color: var(--text-primary);
+}
+
+.commit-compare-btn.active {
+  opacity: 1;
+  color: var(--modified-color);
+  background-color: rgba(224, 164, 88, 0.15);
 }
 
 .commit-item-graph {
@@ -2705,6 +2881,505 @@ input {
   gap: 10px;
   color: var(--text-muted);
   font-size: 13px;
+}
+
+/* 历史列表：未提交的变更条目 */
+.commit-item.uncommitted-item {
+  border-left-color: transparent;
+}
+
+.commit-item.uncommitted-item.selected {
+  border-left-color: var(--accent-color);
+}
+
+.commit-uncommitted-graph {
+  justify-content: center;
+  color: var(--accent-color);
+}
+
+.commit-uncommitted-count {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.commit-uncommitted-hint {
+  color: var(--text-muted);
+}
+
+.commit-list-empty-inline {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 28px 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* 未提交的变更：顶部提交栏 + 连续 Diff */
+.uncommitted-changes-panel {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--bg-primary);
+}
+
+.uncommitted-commit-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 14px;
+  background-color: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+/* 顶部状态栏与工作区文件操作 */
+.uncommitted-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 26px;
+  flex-wrap: wrap;
+}
+
+.uncommitted-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.uncommitted-header-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.uncommitted-header-count {
+  padding: 1px 7px;
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.uncommitted-header-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.uncommitted-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  background-color: var(--bg-tertiary);
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
+}
+
+.uncommitted-tag.staged.has-items {
+  color: var(--accent-color);
+  background-color: var(--added-bg);
+  border-color: rgba(63, 185, 80, 0.3);
+}
+
+.uncommitted-tag.unstaged.has-items {
+  color: var(--warning-color);
+  background-color: rgba(210, 153, 34, 0.1);
+  border-color: rgba(210, 153, 34, 0.3);
+}
+
+.uncommitted-tag.conflict.has-items {
+  color: var(--deleted-color);
+  background-color: rgba(248, 81, 73, 0.12);
+  border-color: rgba(248, 81, 73, 0.35);
+  font-weight: 600;
+}
+
+.uncommitted-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.uncommitted-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 25px;
+  padding: 0 9px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background-color: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.uncommitted-toolbar-btn:hover:not(:disabled) {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+.uncommitted-toolbar-btn.danger:hover:not(:disabled) {
+  background-color: var(--deleted-bg);
+  border-color: var(--error-color);
+  color: var(--error-color);
+}
+
+.uncommitted-toolbar-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.uncommitted-header-divider {
+  width: 1px;
+  height: 14px;
+  background-color: var(--border-color);
+  margin: 0 3px;
+}
+
+.uncommitted-sync-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 25px;
+  padding: 0 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 0.15s;
+  white-space: nowrap;
+}
+
+.uncommitted-sync-btn:hover:not(:disabled) {
+  background-color: var(--bg-hover);
+}
+
+.uncommitted-sync-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Sync Changes 按钮上的待同步数量 */
+.uncommitted-sync-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background-color: var(--accent-color);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+/* 提交输入区域：输入框与 Commit 提交按钮并列 */
+.uncommitted-commit-row {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.uncommitted-commit-input-wrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+
+.uncommitted-commit-input {
+  width: 100%;
+  min-height: 50px;
+  max-height: 120px;
+  padding: 8px 10px;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+  resize: vertical;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.uncommitted-commit-input::placeholder {
+  color: var(--text-muted);
+}
+
+.uncommitted-commit-input:focus {
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 2px rgba(63, 185, 80, 0.15);
+}
+
+/* Commit 提交按钮：垂直自适应对齐输入框，清晰突出 */
+.uncommitted-commit-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 130px;
+  padding: 6px 14px;
+  border: none;
+  border-radius: 6px;
+  background-color: var(--accent-color);
+  color: #ffffff;
+  cursor: pointer;
+  transition: background-color 0.15s, opacity 0.15s;
+  flex-shrink: 0;
+}
+
+.uncommitted-commit-btn:hover:not(:disabled) {
+  background-color: var(--accent-hover);
+}
+
+.uncommitted-commit-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: grayscale(0.2);
+}
+
+.uncommitted-commit-btn-content {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.uncommitted-commit-btn-badge {
+  font-size: 10.5px;
+  font-weight: 500;
+  opacity: 0.9;
+  letter-spacing: 0.2px;
+}
+
+.uncommitted-commit-btn-badge.muted {
+  opacity: 0.7;
+}
+
+/* Amend（修正上一次提交）切换按钮 */
+.uncommitted-amend-toggle {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 72px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background-color: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.uncommitted-amend-toggle:hover:not(:disabled) {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.uncommitted-amend-toggle.active {
+  background-color: rgba(224, 164, 88, 0.16);
+  border-color: var(--modified-color);
+  color: var(--modified-color);
+}
+
+.uncommitted-amend-toggle:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* 未提交视图：左侧文件操作列表 + 右侧 Diff */
+.uncommitted-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+
+.uncommitted-diff-area {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background-color: var(--bg-primary);
+  position: relative;
+}
+
+.uncommitted-diff-area > .all-changes-view {
+  flex: 1;
+  min-height: 0;
+}
+
+/* 折叠在「未提交的变更」记录下方的文件列表 */
+.commit-uncommitted-expand {
+  background-color: var(--bg-secondary);
+}
+
+/* 折叠块内的字体整体小一号 */
+.commit-uncommitted-expand .file-section-header {
+  font-size: 10px;
+}
+
+.commit-uncommitted-expand .file-section-count {
+  font-size: 10px;
+}
+
+.commit-uncommitted-expand .file-item {
+  font-size: 11px;
+}
+
+.commit-uncommitted-expand .file-name,
+.commit-uncommitted-expand .file-base {
+  font-size: 11.5px;
+}
+
+.commit-uncommitted-expand .file-dir,
+.commit-uncommitted-expand .file-stats {
+  font-size: 10px;
+}
+
+.commit-uncommitted-expand .file-badge {
+  font-size: 9px;
+}
+
+/* 最后一个分组（暂存区变更）底部边框 */
+.commit-uncommitted-expand .file-section:last-child {
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.commit-uncommitted-chevron {
+  display: flex;
+  align-items: center;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* 历史提交：顶部提交信息 + 所有文件连续 Diff */
+.commit-changes-view {
+  min-width: 0;
+}
+
+.commit-changes-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background-color: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.commit-changes-subject {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.commit-changes-body-toggle {
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent-color);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.commit-changes-body-toggle:hover {
+  text-decoration: underline;
+}
+
+.commit-changes-body {
+  margin: 0;
+  padding: 8px 10px;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.commit-changes-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.commit-changes-meta-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.commit-changes-meta-item code {
+  font-family: var(--font-mono);
+  color: var(--accent-color);
+  font-weight: 600;
+}
+
+.commit-changes-muted {
+  color: var(--text-muted);
+}
+
+.all-diff-file-old-path {
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  text-decoration: line-through;
 }
 
 /* Commit Detail Panel */
@@ -3247,9 +3922,13 @@ input {
 }
 
 .folder-tree-node.selected {
-  background-color: rgba(47, 129, 247, 0.15);
+  background-color: var(--added-bg);
   border-left-color: var(--accent-color);
   color: var(--text-primary);
+}
+
+.folder-tree-node.selected:hover {
+  background-color: var(--added-line-bg);
 }
 
 .folder-tree-node.dir {
@@ -3557,3 +4236,501 @@ input {
   padding: 32px;
 }
 
+
+/* ═══════════════════════════════════════════════════════════════════
+   合并冲突可视化解决
+   ═══════════════════════════════════════════════════════════════════ */
+.conflict-resolver {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background-color: var(--bg-primary);
+}
+
+.conflict-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px;
+  background-color: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.conflict-header-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.conflict-header-icon {
+  color: var(--modified-color);
+  flex-shrink: 0;
+}
+
+.conflict-header-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.conflict-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.conflict-path {
+  margin-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conflict-count {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.conflict-count.has-conflicts {
+  color: var(--deleted-color);
+  background-color: rgba(248, 81, 73, 0.14);
+  border: 1px solid rgba(248, 81, 73, 0.3);
+}
+
+.conflict-count.no-conflicts {
+  color: var(--added-color);
+  background-color: rgba(63, 185, 80, 0.14);
+  border: 1px solid rgba(63, 185, 80, 0.3);
+}
+
+.conflict-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.conflict-quick-btn,
+.conflict-save-btn,
+.conflict-mark-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.conflict-quick-btn:hover:not(:disabled),
+.conflict-mark-btn:hover:not(:disabled) {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.conflict-save-btn {
+  background-color: var(--accent-color);
+  border-color: var(--accent-color);
+  color: #ffffff;
+}
+
+.conflict-save-btn:hover:not(:disabled) {
+  background-color: var(--accent-hover);
+}
+
+.conflict-quick-btn:disabled,
+.conflict-save-btn:disabled,
+.conflict-mark-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.conflict-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.conflict-block {
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  overflow: hidden;
+  background-color: var(--bg-secondary);
+}
+
+.conflict-block-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  background-color: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.conflict-block-index {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.conflict-block-labels {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+  min-width: 0;
+}
+
+.conflict-label {
+  max-width: 160px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conflict-label.ours {
+  color: var(--accent-color);
+  background-color: rgba(47, 129, 247, 0.12);
+}
+
+.conflict-label.theirs {
+  color: var(--modified-color);
+  background-color: rgba(224, 164, 88, 0.12);
+}
+
+.conflict-sides {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.conflict-side {
+  min-width: 0;
+}
+
+.conflict-side + .conflict-side {
+  border-left: 1px solid var(--border-subtle);
+}
+
+.conflict-side-header {
+  padding: 4px 10px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background-color: var(--bg-primary);
+}
+
+.conflict-side-content {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 220px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  white-space: pre;
+}
+
+.conflict-choice-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+}
+
+.conflict-choice-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 9px;
+  border-radius: 5px;
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background-color 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.conflict-choice-btn:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.conflict-choice-btn.active {
+  background-color: rgba(47, 129, 247, 0.16);
+  border-color: var(--accent-color);
+  color: var(--accent-color);
+  font-weight: 600;
+}
+
+.conflict-preview-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 4px 6px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.conflict-preview-toggle:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.conflict-result-preview {
+  margin: 0 10px 10px;
+  padding: 8px 10px;
+  max-height: 200px;
+  overflow: auto;
+  border: 1px dashed var(--border-color);
+  border-radius: 6px;
+  background-color: var(--bg-primary);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  white-space: pre;
+}
+
+.conflict-loading,
+.conflict-no-markers {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 20px 16px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.conflict-no-markers {
+  color: var(--added-color);
+  align-items: flex-start;
+}
+
+.conflict-no-markers-sub {
+  margin-top: 4px;
+  color: var(--text-muted);
+}
+
+.conflict-load-error,
+.conflict-action-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 14px 0;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background-color: var(--deleted-bg);
+  border: 1px solid rgba(248, 81, 73, 0.3);
+  color: var(--error-color);
+  font-size: 12px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   提交间对比 / Cherry-pick
+   ═══════════════════════════════════════════════════════════════════ */
+.commit-compare-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background-color: rgba(224, 164, 88, 0.1);
+  border-bottom: 1px solid rgba(224, 164, 88, 0.3);
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.commit-compare-banner-icon {
+  color: var(--modified-color);
+  flex-shrink: 0;
+}
+
+.commit-compare-banner-title {
+  font-weight: 600;
+  color: var(--modified-color);
+  flex-shrink: 0;
+}
+
+.commit-compare-banner code {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--modified-color);
+}
+
+.commit-compare-banner-arrow {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.commit-compare-banner-subject {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+.commit-compare-exit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 5px;
+  border: 1px solid rgba(224, 164, 88, 0.4);
+  background: transparent;
+  color: var(--modified-color);
+  font-size: 11px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.commit-compare-exit:hover {
+  background-color: rgba(224, 164, 88, 0.15);
+}
+
+.commit-cherry-pick-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 3px 9px;
+  border-radius: 5px;
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.commit-cherry-pick-btn:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--accent-color);
+}
+
+.compare-empty-state {
+  gap: 6px;
+}
+
+.compare-empty-state code {
+  font-family: var(--font-mono);
+  color: var(--modified-color);
+}
+
+.compare-empty-cancel {
+  margin-top: 10px;
+  padding: 5px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.compare-empty-cancel:hover {
+  background-color: var(--bg-hover);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   可拖拽侧边栏宽度
+   ═══════════════════════════════════════════════════════════════════ */
+.sidebar-resize-handle {
+  position: relative;
+  flex: 0 0 0px;
+  width: 0px;
+  cursor: col-resize;
+  background: transparent;
+  touch-action: none;
+  z-index: 25;
+  outline: none;
+  overflow: visible;
+  align-self: stretch;
+}
+
+/* 扩展可拖拽鼠标热区（8px），不占用实际布局宽度，彻底避免出现白色/空白间隙 */
+.sidebar-resize-handle::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  width: 8px;
+  cursor: col-resize;
+  z-index: 1;
+}
+
+.sidebar-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -0.5px;
+  width: 1px;
+  background-color: var(--border-subtle);
+  transition: background-color 0.15s, width 0.15s, left 0.15s;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.sidebar-resize-handle:hover::after,
+.sidebar-resize-handle.dragging::after,
+.sidebar-resize-handle:focus-visible::after {
+  left: -1px;
+  width: 2px;
+  background-color: var(--accent-color);
+}
+
+/* 拖拽期间保持玻璃光标并禁止选中文本 */
+body.resizing-sidebar,
+body.resizing-sidebar * {
+  cursor: col-resize !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+/* 不显示常驻分隔线的手柄（项目侧边栏）：平时无缝贴合，仅悬停 / 拖动时显示主题色指示条 */
+.sidebar-resize-handle.no-line::after {
+  background-color: transparent;
+}
+
+.sidebar-resize-handle.no-line:hover::after,
+.sidebar-resize-handle.no-line.dragging::after,
+.sidebar-resize-handle.no-line:focus-visible::after {
+  left: -1px;
+  width: 2px;
+  background-color: var(--accent-color);
+}

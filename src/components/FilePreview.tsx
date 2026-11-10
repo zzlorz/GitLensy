@@ -3,92 +3,7 @@ import { readTextFile, readFile, stat } from "@tauri-apps/plugin-fs";
 import { FileText, Image, Loader2, AlertTriangle, FileQuestion, X, ExternalLink } from "lucide-react";
 import { getFileDiff, openInEditor } from "../api/tauri";
 import type { ChangedFile, DiffView, FileDiff } from "../types";
-import hljs from "highlight.js/lib/core";
-import javascript from "highlight.js/lib/languages/javascript";
-import typescript from "highlight.js/lib/languages/typescript";
-import python from "highlight.js/lib/languages/python";
-import rust from "highlight.js/lib/languages/rust";
-import go from "highlight.js/lib/languages/go";
-import java from "highlight.js/lib/languages/java";
-import c from "highlight.js/lib/languages/c";
-import cpp from "highlight.js/lib/languages/cpp";
-import csharp from "highlight.js/lib/languages/csharp";
-import php from "highlight.js/lib/languages/php";
-import ruby from "highlight.js/lib/languages/ruby";
-import swift from "highlight.js/lib/languages/swift";
-import kotlin from "highlight.js/lib/languages/kotlin";
-import html from "highlight.js/lib/languages/xml";
-import css from "highlight.js/lib/languages/css";
-import scss from "highlight.js/lib/languages/scss";
-import json from "highlight.js/lib/languages/json";
-import yaml from "highlight.js/lib/languages/yaml";
-import ini from "highlight.js/lib/languages/ini";
-import bash from "highlight.js/lib/languages/bash";
-import sql from "highlight.js/lib/languages/sql";
-import markdown from "highlight.js/lib/languages/markdown";
-import dockerfile from "highlight.js/lib/languages/dockerfile";
-import nginx from "highlight.js/lib/languages/nginx";
-import gradle from "highlight.js/lib/languages/gradle";
-import cmake from "highlight.js/lib/languages/cmake";
-import less from "highlight.js/lib/languages/less";
-import githubDark from "highlight.js/styles/github-dark.css?inline";
-import githubLight from "highlight.js/styles/github.css?inline";
-
-// 注册高亮语言
-hljs.registerLanguage("javascript", javascript);
-hljs.registerLanguage("js", javascript);
-hljs.registerLanguage("jsx", javascript);
-hljs.registerLanguage("mjs", javascript);
-hljs.registerLanguage("cjs", javascript);
-hljs.registerLanguage("typescript", typescript);
-hljs.registerLanguage("ts", typescript);
-hljs.registerLanguage("tsx", typescript);
-hljs.registerLanguage("python", python);
-hljs.registerLanguage("py", python);
-hljs.registerLanguage("rust", rust);
-hljs.registerLanguage("rs", rust);
-hljs.registerLanguage("go", go);
-hljs.registerLanguage("java", java);
-hljs.registerLanguage("c", c);
-hljs.registerLanguage("cpp", cpp);
-hljs.registerLanguage("hpp", cpp);
-hljs.registerLanguage("csharp", csharp);
-hljs.registerLanguage("cs", csharp);
-hljs.registerLanguage("php", php);
-hljs.registerLanguage("ruby", ruby);
-hljs.registerLanguage("rb", ruby);
-hljs.registerLanguage("swift", swift);
-hljs.registerLanguage("kotlin", kotlin);
-hljs.registerLanguage("kt", kotlin);
-hljs.registerLanguage("kts", kotlin);
-hljs.registerLanguage("html", html);
-hljs.registerLanguage("htm", html);
-hljs.registerLanguage("xml", html);
-hljs.registerLanguage("svg", html);
-hljs.registerLanguage("vue", html); // vue 文件用 xml/html 语法高亮近似
-hljs.registerLanguage("css", css);
-hljs.registerLanguage("scss", scss);
-hljs.registerLanguage("less", less);
-hljs.registerLanguage("json", json);
-hljs.registerLanguage("yaml", yaml);
-hljs.registerLanguage("yml", yaml);
-hljs.registerLanguage("ini", ini);
-hljs.registerLanguage("cfg", ini);
-hljs.registerLanguage("conf", ini);
-hljs.registerLanguage("properties", ini);
-hljs.registerLanguage("bash", bash);
-hljs.registerLanguage("sh", bash);
-hljs.registerLanguage("zsh", bash);
-hljs.registerLanguage("fish", bash);
-hljs.registerLanguage("cmd", bash);
-hljs.registerLanguage("bat", bash);
-hljs.registerLanguage("sql", sql);
-hljs.registerLanguage("markdown", markdown);
-hljs.registerLanguage("md", markdown);
-hljs.registerLanguage("dockerfile", dockerfile);
-hljs.registerLanguage("nginx", nginx);
-hljs.registerLanguage("gradle", gradle);
-hljs.registerLanguage("cmake", cmake);
+import { ensureHighlightTheme, getExtension, highlightCode } from "../lib/highlight";
 
 interface Props {
   fullPath: string;
@@ -96,38 +11,6 @@ interface Props {
   /** 该文件在 Git 中的变更信息；为 null 表示没有变更，不标注 */
   change?: ChangedFile | null;
 }
-
-// 扩展名 → 高亮语言名的映射（没有注册的返回 null → 自动检测 / 纯文本）
-const EXT_TO_LANG: Record<string, string> = {
-  js: "javascript", jsx: "javascript", mjs: "javascript", cjs: "javascript",
-  ts: "typescript", tsx: "typescript",
-  py: "python", pyw: "python",
-  rs: "rust",
-  go: "go",
-  java: "java",
-  c: "c", h: "c",
-  cpp: "cpp", cc: "cpp", hpp: "cpp",
-  cs: "csharp",
-  php: "php",
-  rb: "ruby",
-  swift: "swift",
-  kt: "kotlin", kts: "kotlin",
-  html: "html", htm: "html",
-  xml: "xml", svg: "xml",
-  vue: "html",
-  css: "css",
-  scss: "scss", sass: "scss", less: "css",
-  json: "json",
-  yaml: "yaml", yml: "yaml",
-  ini: "ini", cfg: "ini", conf: "ini", properties: "ini",
-  toml: "toml",
-  sh: "bash", bash: "bash", zsh: "bash", fish: "bash",
-  ps1: "bash", psm1: "bash", cmd: "bash", bat: "bash",
-  sql: "sql",
-  md: "markdown", markdown: "markdown",
-  dockerfile: "dockerfile",
-  nginx: "nginx",
-};
 
 // 文本文件扩展名（有高亮或需要纯文本展示）
 const TEXT_EXTENSIONS = new Set([
@@ -149,36 +32,10 @@ const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "s
 const MAX_TEXT_SIZE = 512 * 1024;
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
 
-function getExtension(path: string): string {
-  const normalized = path.replace(/\\/g, "/");
-  const lastSlash = normalized.lastIndexOf("/");
-  const fileName = lastSlash !== -1 ? normalized.slice(lastSlash + 1) : normalized;
-  const dotIndex = fileName.lastIndexOf(".");
-  if (dotIndex === -1) return "";
-  return fileName.slice(dotIndex + 1).toLowerCase();
-}
-
 function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-/** 用 highlight.js 生成高亮 HTML；失败则返回纯文本 HTML */
-function highlightCode(code: string, ext: string): { html: string; language: string | null } {
-  const lang = EXT_TO_LANG[ext] ?? null;
-  try {
-    if (lang && hljs.getLanguage(lang)) {
-      const result = hljs.highlight(code, { language: lang, ignoreIllegals: true });
-      return { html: result.value, language: lang };
-    }
-    // 自动检测
-    const result = hljs.highlightAuto(code);
-    return { html: result.value, language: result.language ?? null };
-  } catch {
-    // 兜底：转义后直接展示
-    return { html: code.replace(/[<>]/g, (c) => (c === "<" ? "&lt;" : "&gt;")), language: null };
-  }
 }
 
 interface BlockLine {
@@ -276,32 +133,9 @@ export default function FilePreview({ fullPath, relPath, change }: Props) {
   const objectUrlRef = useRef<string | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
 
-  // 根据应用主题动态切换 highlight.js 主题
+  // 高亮主题由共享模块统一注入并跟随 data-theme 切换
   useEffect(() => {
-    const styleId = "hljs-theme";
-    const getThemeStyle = () => {
-      const t = document.documentElement.getAttribute("data-theme");
-      return t === "light" ? githubLight : githubDark;
-    };
-
-    let style = document.getElementById(styleId) as HTMLStyleElement | null;
-    if (!style) {
-      style = document.createElement("style");
-      style.id = styleId;
-      document.head.appendChild(style);
-    }
-    style.textContent = getThemeStyle();
-
-    // 监听 data-theme 属性变化（系统主题变化也会触发 App.tsx 里的 applyTheme → 写 data-theme）
-    const observer = new MutationObserver(() => {
-      if (style) style.textContent = getThemeStyle();
-    });
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
-
-    return () => {
-      observer.disconnect();
-      // 不删除 style —— 其他 FilePreview 实例可能还在用
-    };
+    ensureHighlightTheme();
   }, []);
 
   useEffect(() => {

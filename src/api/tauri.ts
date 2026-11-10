@@ -253,6 +253,82 @@ export async function checkoutBranch(name: string, isRemote: boolean): Promise<v
   return invoke<void>("checkout_branch", { name, isRemote });
 }
 
+// ── 合并冲突可视化解决 ──────────────────────────────────────────────
+
+/** 读取冲突文件内容（通常仍带冲突标记） */
+export async function getConflictFile(filePath: string): Promise<string> {
+  return invoke<string>("get_conflict_file", { filePath });
+}
+
+/** 写入解决后的内容并标记为已解决（git add） */
+export async function resolveConflict(filePath: string, content: string): Promise<void> {
+  return invoke<void>("resolve_conflict", { filePath, content });
+}
+
+/** 不修改内容，直接把文件标记为已解决（git add） */
+export async function markConflictResolved(filePath: string): Promise<void> {
+  return invoke<void>("mark_conflict_resolved", { filePath });
+}
+
+// ── 更多分支操作 ────────────────────────────────────────────────────
+
+/** 删除分支；force 为 true 时可删除未合并分支 */
+export async function deleteBranch(name: string, force = false): Promise<void> {
+  return invoke<void>("delete_branch", { name, force });
+}
+
+/** 重命名本地分支 */
+export async function renameBranch(oldName: string, newName: string): Promise<void> {
+  return invoke<void>("rename_branch", { oldName, newName });
+}
+
+/** 把指定分支合并到当前分支 */
+export async function mergeBranch(name: string): Promise<void> {
+  return invoke<void>("merge_branch", { name });
+}
+
+/** 把当前分支 rebase 到指定分支 */
+export async function rebaseBranch(onto: string): Promise<void> {
+  return invoke<void>("rebase_branch", { onto });
+}
+
+/** 把指定提交 cherry-pick 到当前分支 */
+export async function cherryPickCommit(hash: string): Promise<void> {
+  return invoke<void>("cherry_pick_commit", { hash });
+}
+
+// ── 提交增强 ────────────────────────────────────────────────────────
+
+/** 修正上一次提交；message 为空时沿用原提交信息 */
+export async function amendCommit(message?: string): Promise<void> {
+  return invoke<void>("amend_commit", { message: message ?? null });
+}
+
+/** 撤销上一次提交（soft reset，内容保留在暂存区） */
+export async function undoLastCommit(): Promise<void> {
+  return invoke<void>("undo_last_commit");
+}
+
+/** 两个提交之间的文件列表 */
+export async function getCompareFiles(fromHash: string, toHash: string): Promise<CommitFile[]> {
+  return invoke<CommitFile[]>("get_compare_files", { fromHash, toHash });
+}
+
+/** 两个提交之间单个文件的 diff */
+export async function getCompareFileDiff(
+  fromHash: string,
+  toHash: string,
+  filePath: string,
+  oldPath?: string,
+): Promise<FileDiff> {
+  return invoke<FileDiff>("get_compare_file_diff", {
+    fromHash,
+    toHash,
+    filePath,
+    oldPath: oldPath ?? null,
+  });
+}
+
 /** 动态同步更新原生窗口标题栏主题（暗色 / 亮色） */
 export async function setWindowTheme(theme: string): Promise<void> {
   return invoke<void>("set_window_theme", { theme });

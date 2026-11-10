@@ -27,7 +27,13 @@ function entryKey(entry: Entry): string {
 }
 
 /** 全部变更文件的左右对比视图：文件按顺序从上到下连续滚动 */
-export default function AllChangesView({ status }: { status: GitStatus }) {
+export default function AllChangesView({
+  status,
+  title = "所有变更文件",
+}: {
+  status: GitStatus;
+  title?: string;
+}) {
   // 全部变更对比默认双栏，每次打开都从双栏开始
   const [layout, setLayout] = useState<DiffLayout>("split");
   const [diffs, setDiffs] = useState<Record<string, FileDiff>>({});
@@ -85,7 +91,7 @@ export default function AllChangesView({ status }: { status: GitStatus }) {
     <div className="all-changes-view">
       <div className="all-changes-toolbar">
         <span className="all-changes-title">
-          所有变更文件
+          {title}
           <span className="all-changes-count">{entries.length}</span>
         </span>
         <div className="diff-view-toggle">
@@ -144,7 +150,7 @@ export default function AllChangesView({ status }: { status: GitStatus }) {
                 {errors[key] ? (
                   <div className="all-diff-error">获取 Diff 失败：{errors[key]}</div>
                 ) : diffs[key] ? (
-                  <DiffBody diff={diffs[key]} layout={layout} />
+                  <DiffBody diff={diffs[key]} layout={layout} filePath={entry.file.path} />
                 ) : null}
               </section>
             );

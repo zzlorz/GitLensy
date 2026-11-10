@@ -9,6 +9,7 @@ mod status;
 mod diff;
 mod history;
 mod commands;
+mod watcher;
 
 use std::sync::Mutex;
 
@@ -17,6 +18,8 @@ pub use models::*;
 
 struct AppState {
     repo_path: Mutex<Option<String>>,
+    /// 仓库文件监听器；打开新仓库时替换，关闭仓库时 drop 停止监听。
+    watcher: Mutex<Option<notify::RecommendedWatcher>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -26,6 +29,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .manage(AppState {
             repo_path: Mutex::new(None),
+            watcher: Mutex::new(None),
         })
         .invoke_handler(tauri::generate_handler![
             commands::open_repository,
@@ -60,6 +64,18 @@ pub fn run() {
             commands::open_with_method,
             commands::get_branches,
             commands::checkout_branch,
+            commands::get_conflict_file,
+            commands::resolve_conflict,
+            commands::mark_conflict_resolved,
+            commands::delete_branch,
+            commands::rename_branch,
+            commands::merge_branch,
+            commands::rebase_branch,
+            commands::cherry_pick_commit,
+            commands::amend_commit,
+            commands::undo_last_commit,
+            commands::get_compare_files,
+            commands::get_compare_file_diff,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application")

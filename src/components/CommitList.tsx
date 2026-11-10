@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback, useMemo } from "react";
-import { GitCommit, Loader2 } from "lucide-react";
+import type { ReactNode } from "react";
+import { ChevronDown, ChevronRight, FileCode2, GitCommit, GitCompare, Loader2 } from "lucide-react";
 import type { CommitInfo } from "../types";
 
 interface Props {
@@ -9,6 +10,17 @@ interface Props {
   hasMore: boolean;
   onSelect: (commit: CommitInfo) => void;
   onLoadMore: () => void;
+  /** 当前未提交变更涉及的文件数 */
+  uncommittedCount: number;
+  /** 是否选中并展开「未提交的变更」 */
+  uncommittedSelected: boolean;
+  onSelectUncommitted: () => void;
+  /** 展开后显示在记录下方的变更文件操作列表 */
+  uncommittedContent?: ReactNode;
+  /** 当前选中的「提交间对比」基准提交 */
+  compareBaseHash?: string | null;
+  /** 设置 / 取消对比基准 */
+  onToggleCompareBase?: (commit: CommitInfo) => void;
 }
 
 /** 每一行提交固定的高度，用于绘制拓扑图的坐标计算 */
@@ -115,13 +127,17 @@ function CommitItem({
   row,
   graphWidth,
   selected,
+  compareBase,
   onClick,
+  onToggleCompareBase,
 }: {
   commit: CommitInfo;
   row: GraphRow;
   graphWidth: number;
   selected: boolean;
+  compareBase: boolean;
   onClick: () => void;
+  onToggleCompareBase: (commit: CommitInfo) => void;
 }) {
   const isMerge = commit.parent_count >= 2;
   const nodeX = laneX(row.lane);
@@ -130,7 +146,7 @@ function CommitItem({
 
   return (
     <div
-      className={`commit-item ${selected ? "selected" : ""}`}
+      className={`commit-item ${selected ? "selected" : ""} ${compareBase ? "compare-base" : ""}`}
       onClick={onClick}
       title={commit.hash}
     >
@@ -215,6 +231,18 @@ function CommitItem({
           </span>
         </div>
       </div>
+
+      <button
+        type="button"
+        className={`commit-compare-btn ${compareBase ? "active" : ""}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggleCompareBase(commit);
+        }}
+        title={compareBase ? "取消对比基准" : "设为对比基准，再点击另一条提交进行对比"}
+      >
+        <GitCompare size={13} />
+      </button>
     </div>
   );
 }
@@ -241,6 +269,12 @@ export default function CommitList({
   hasMore,
   onSelect,
   onLoadMore,
+  uncommittedCount,
+  uncommittedSelected,
+  onSelectUncommitted,
+  uncommittedContent,
+  compareBaseHash,
+  onToggleCompareBase,
 }: Props) {
   const sentinelRef = useRef<HTMLDivElement>(null);
 
@@ -271,17 +305,36 @@ export default function CommitList({
     return (Math.min(maxLane + 1, MAX_LANES)) * LANE_WIDTH + 4;
   }, [rows]);
 
-  if (!loading && commits.length === 0) {
-    return (
-      <div className="commit-list-empty">
-        <GitCommit size={32} strokeWidth={1.5} style={{ opacity: 0.3 }} />
-        <span>暂无匹配的提交记录</span>
-      </div>
-    );
-  }
-
   return (
     <div className="commit-list">
+      {/* 未提交的变更：始终作为最新一条记录显示在历史最上方 */}
+      <div
+        className={`commit-item uncommitted-item ${uncommittedSelected ? "selected" : ""}`}
+        onClick={onSelectUncommitted}
+        title="未提交的变更"
+      >
+        <div className="commit-item-graph commit-uncommitted-graph" style={{ width: graphWidth }}>
+          <FileCode2 size={14} />
+        </div>
+        <div className="commit-item-content">
+          <div className="commit-subject">未提交的变更</div>
+          <div className="commit-meta">
+            <span className="commit-uncommitted-count">
+              {uncommittedCount > 0 ? `${uncommittedCount} 个文件` : "暂无变更"}
+            </span>
+            <span className="commit-uncommitted-hint">工作区 / 暂存区</span>
+          </div>
+        </div>
+        <span className="commit-uncommitted-chevron">
+          {uncommittedSelected ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        </span>
+      </div>
+
+      {/* 折叠在「未提交的变更」记录下方：变更文件列表与文件操作 */}
+      {uncommittedSelected && uncommittedContent && (
+        <div className="commit-uncommitted-expand">{uncommittedContent}</div>
+      )}
+
       {commits.map((commit, index) => (
         <CommitItem
           key={commit.hash}
@@ -289,7 +342,9 @@ export default function CommitList({
           row={rows[index]}
           graphWidth={graphWidth}
           selected={selectedHash === commit.hash}
+          compareBase={compareBaseHash === commit.hash}
           onClick={() => onSelect(commit)}
+          onToggleCompareBase={onToggleCompareBase ?? (() => {})}
         />
       ))}
 
@@ -300,6 +355,13 @@ export default function CommitList({
         <div className="commit-list-loading">
           <Loader2 size={14} className="spin" />
           <span>加载中...</span>
+        </div>
+      )}
+
+      {!loading && commits.length === 0 && (
+        <div className="commit-list-empty-inline">
+          <GitCommit size={22} strokeWidth={1.5} style={{ opacity: 0.3 }} />
+          <span>暂无提交记录</span>
         </div>
       )}
 

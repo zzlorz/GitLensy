@@ -5,6 +5,7 @@ import MainWorkspace from "./pages/MainWorkspace";
 import SettingsModal from "./components/SettingsModal";
 import type { RepositoryInfo, ThemeMode } from "./types";
 import { getSavedRepo, saveCurrentRepo, openRepository, closeRepository, setWindowTheme, getPreferredEditor, setPreferredEditor } from "./api/tauri";
+import { ensureHighlightTheme } from "./lib/highlight";
 
 const THEME_KEY = "gitlensy:theme";
 
@@ -42,6 +43,8 @@ export default function App() {
       document.documentElement.setAttribute("data-theme", effectiveTheme);
       // 同步更新原生窗口标题栏主题
       setWindowTheme(effectiveTheme).catch(() => {});
+      // 保证代码高亮主题与当前应用主题一致
+      ensureHighlightTheme();
     };
 
     applyTheme();

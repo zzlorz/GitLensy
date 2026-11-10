@@ -280,7 +280,7 @@ export default function FileList({
         onUnstage={onUnstage}
         onPreview={onPreview}
         scope="staged"
-        defaultCollapsed={status.staged.length === 0}
+        defaultCollapsed={false}
       />
     </div>
   );

@@ -1,20 +1,24 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { listen } from "@tauri-apps/api/event";
 import {
   GitBranch, RotateCw, FolderSync, Terminal, MoreHorizontal, Tag, Archive, ArchiveRestore, Trash2,
   FileCode2, AlertTriangle, Loader2, GitCommit, Diff, Search, Settings, X,
-  Download, Upload, ChevronDown, Check, ExternalLink,
+  Download, Upload, ChevronDown, Check, ExternalLink, Plus, Undo2,
+  Pencil, GitMerge, GitCompare, RotateCcw,
 } from "lucide-react";
-import FileList from "../components/FileList";
 import CommitList from "../components/CommitList";
-import CommitDetail from "../components/CommitDetail";
+import CommitChangesView from "../components/CommitChangesView";
+import FileList from "../components/FileList";
 import DiffViewer from "../components/DiffViewer";
 import AllChangesView from "../components/AllChangesView";
 import ConfirmDialog from "../components/ConfirmDialog";
+import ConflictResolver from "../components/ConflictResolver";
+import SidebarResizeHandle from "../components/SidebarResizeHandle";
 import FilePreview from "../components/FilePreview";
 import ProjectSidebar from "../components/ProjectSidebar";
 import { WindowControls, WindowResizeHandles } from "../components/WindowControls";
-import type { RepositoryInfo, GitStatus, ChangedFile, DiffView, FileDiff, CommitInfo, CommitFile, RecentRepo, SyncStatus, StashEntry, BranchList } from "../types";
-import { getStatus, getFileDiff, saveCurrentRepo, getCommitLog, getCommitFiles, getCommitFileDiff, openTerminal, revertFile, stageFile, stageAll, discardAllUnstaged, commitChanges, getSyncStatus, syncChanges, pullChanges, fetchChanges, pushChanges, createBranch, createTag, stashChanges, getStashList, popStash, applyStash, dropStash, clearStashes, getBranches, checkoutBranch, openPath, getRecentRepos, openRepository, removeRecentRepo } from "../api/tauri";
+import type { RepositoryInfo, GitStatus, ChangedFile, DiffView, FileDiff, CommitInfo, RecentRepo, SyncStatus, StashEntry, BranchList } from "../types";
+import { getStatus, getFileDiff, saveCurrentRepo, getCommitLog, openTerminal, revertFile, stageFile, stageAll, discardAllUnstaged, commitChanges, getSyncStatus, syncChanges, pullChanges, fetchChanges, pushChanges, createBranch, createTag, stashChanges, getStashList, popStash, applyStash, dropStash, clearStashes, getBranches, checkoutBranch, openPath, getRecentRepos, openRepository, removeRecentRepo, deleteBranch, renameBranch, mergeBranch, rebaseBranch, cherryPickCommit, amendCommit, undoLastCommit } from "../api/tauri";
 import type { OpenMethod } from "../api/tauri";
 
 const PAGE_SIZE = 50;
@@ -26,20 +30,45 @@ const OPEN_METHODS: { id: OpenMethod; label: string }[] = [
   { id: "system", label: "默认应用" },
 ];
 
-/** Adapter so we can reuse DiffViewer for commit files */
-function makeChangedFile(file: CommitFile) {
-  return {
-    path: file.path,
-    old_path: file.old_path,
-    status: file.status,
-    staged_status: undefined,
-    unstaged_status: undefined,
-    additions: file.additions,
-    deletions: file.deletions,
-    is_binary: false,
-    has_staged_changes: false,
-    has_unstaged_changes: false,
-  } as const;
+/** 状态中是否存在未解决的合并冲突 */
+function statusHasConflicts(status: GitStatus | null | undefined): boolean {
+  if (!status) return false;
+  return [...status.unstaged, ...status.staged].some(
+    (file) =>
+      file.status === "conflict" ||
+      file.staged_status === "conflict" ||
+      file.unstaged_status === "conflict",
+  );
+}
+
+// 侧边栏宽度持久化
+const PROJECT_SIDEBAR_WIDTH_KEY = "gitlensy:projectSidebarWidth";
+const PROJECT_SIDEBAR_DEFAULT_WIDTH = 200;
+const PROJECT_SIDEBAR_MIN_WIDTH = 160;
+const PROJECT_SIDEBAR_MAX_WIDTH = 420;
+
+const COMMIT_SIDEBAR_WIDTH_KEY = "gitlensy:commitSidebarWidth";
+const COMMIT_SIDEBAR_DEFAULT_WIDTH = 320;
+const COMMIT_SIDEBAR_MIN_WIDTH = 240;
+const COMMIT_SIDEBAR_MAX_WIDTH = 600;
+
+function loadStoredWidth(key: string, fallback: number, min: number, max: number): number {
+  try {
+    const raw = localStorage.getItem(key);
+    const value = raw ? Number.parseInt(raw, 10) : Number.NaN;
+    if (Number.isFinite(value)) return Math.min(max, Math.max(min, value));
+  } catch {
+    // localStorage 不可用时使用默认值
+  }
+  return fallback;
+}
+
+function persistWidth(key: string, width: number): void {
+  try {
+    localStorage.setItem(key, String(Math.round(width)));
+  } catch {
+    // ignore
+  }
 }
 
 interface Props {
@@ -52,10 +81,30 @@ interface Props {
 type Tab = "changes" | "history";
 
 export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenSettings }: Props) {
-  const [activeTab, setActiveTab] = useState<Tab>("changes");
+  // 变更 tab 暂时隐藏，只保留提交记录
+  const [activeTab] = useState<Tab>("history");
   const [filter, setFilter] = useState("");
 
   const [recentRepos, setRecentRepos] = useState<RecentRepo[]>(getRecentRepos());
+
+  // ── 侧边栏宽度（可拖拽，持久化到 localStorage）─────────────────────
+  const [projectSidebarWidth, setProjectSidebarWidth] = useState(() =>
+    loadStoredWidth(
+      PROJECT_SIDEBAR_WIDTH_KEY,
+      PROJECT_SIDEBAR_DEFAULT_WIDTH,
+      PROJECT_SIDEBAR_MIN_WIDTH,
+      PROJECT_SIDEBAR_MAX_WIDTH,
+    ),
+  );
+  const [projectSidebarCollapsed, setProjectSidebarCollapsed] = useState(false);
+  const [commitSidebarWidth, setCommitSidebarWidth] = useState(() =>
+    loadStoredWidth(
+      COMMIT_SIDEBAR_WIDTH_KEY,
+      COMMIT_SIDEBAR_DEFAULT_WIDTH,
+      COMMIT_SIDEBAR_MIN_WIDTH,
+      COMMIT_SIDEBAR_MAX_WIDTH,
+    ),
+  );
 
   const refreshRecentRepos = useCallback(() => {
     setRecentRepos(getRecentRepos());
@@ -109,6 +158,20 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
   const [branches, setBranches] = useState<BranchList | null>(null);
   const [branchMenuOpen, setBranchMenuOpen] = useState(false);
   const [branchBusy, setBranchBusy] = useState(false);
+  /** 分支操作：合并 / 变基 / 删除 / 重命名 */
+  type BranchActionType = "merge" | "rebase" | "delete" | "rename";
+  const [branchAction, setBranchAction] = useState<{ type: BranchActionType; name: string } | null>(null);
+  const [branchActionInput, setBranchActionInput] = useState("");
+  const [branchActionBusy, setBranchActionBusy] = useState(false);
+  const [branchActionError, setBranchActionError] = useState<string | null>(null);
+  /** 提交间对比的基准提交 */
+  const [compareFrom, setCompareFrom] = useState<CommitInfo | null>(null);
+  /** 是否进入 Amend（修正上一次提交）模式 */
+  const [amendMode, setAmendMode] = useState(false);
+  /** 撤销上次提交、cherry-pick 等 Git 操作的进行中标记 */
+  const [gitBusy, setGitBusy] = useState(false);
+  const [confirmUndoCommit, setConfirmUndoCommit] = useState(false);
+  const [cherryPickTarget, setCherryPickTarget] = useState<CommitInfo | null>(null);
 
   // ── 打开方式下拉（一次性选择，不记录状态）──────────────────────────
   const [openMenuOpen, setOpenMenuOpen] = useState(false);
@@ -118,7 +181,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [selectedFile, setSelectedFile] = useState<ChangedFile | null>(null);
   /** 右侧内容区模式：diff = 单文件对比，file = 文件内容预览，all = 所有变更文件连续对比 */
-  const [rightPanelMode, setRightPanelMode] = useState<"diff" | "file" | "all">("diff");
+  const [rightPanelMode, setRightPanelMode] = useState<"diff" | "file" | "all">("all");
   const [diffView, setDiffView] = useState<DiffView>("unstaged");
   const [diff, setDiff] = useState<FileDiff | null>(null);
   const [loading, setLoading] = useState(false);
@@ -127,6 +190,8 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
   const [diffError, setDiffError] = useState<string | null>(null);
   const diffRequestId = useRef(0);
   const diffCache = useRef<Map<string, FileDiff>>(new Map());
+  /** 最近一次状态刷新的时间，用于抑制文件监听引起的重复刷新 */
+  const lastStatusLoadRef = useRef(0);
   const selectedFileRef = useRef<ChangedFile | null>(null);
   selectedFileRef.current = selectedFile;
 
@@ -170,7 +235,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
     // 重置变更列表状态
     setStatus(null);
     setSelectedFile(null);
-    setRightPanelMode("diff");
+    setRightPanelMode("all");
     setDiff(null);
     setDiffLoading(false);
     setError(null);
@@ -183,10 +248,13 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
     hasMoreRef.current = true;
     offsetRef.current = 0;
     setSelectedCommit(null);
-    setCommitFiles([]);
-    setSelectedCommitFile(null);
-    setCommitDiff(null);
-    commitDiffCache.current.clear();
+    setShowUncommitted(false);
+    setCompareFrom(null);
+    setAmendMode(false);
+    setBranchAction(null);
+    setBranchActionError(null);
+    setConfirmUndoCommit(false);
+    setCherryPickTarget(null);
 
     // 重置文件夹 tab 状态
     setSelectedFolderFile(null);
@@ -209,6 +277,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
   }, [repo.path]);
 
   const loadStatus = useCallback(async () => {
+    lastStatusLoadRef.current = Date.now();
     setLoading(true);
     setError(null);
     try {
@@ -240,6 +309,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
         const updated = allFiles.find((f) => f.path === prev.path) ?? null;
         return updated;
       });
+      return s;
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -319,17 +389,8 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
   const logLoadingRef = useRef(false);
 
   const [selectedCommit, setSelectedCommit] = useState<CommitInfo | null>(null);
-  const [commitFiles, setCommitFiles] = useState<CommitFile[]>([]);
-  const [filesLoading, setFilesLoading] = useState(false);
-  const [filesError, setFilesError] = useState<string | null>(null);
-
-  const [selectedCommitFile, setSelectedCommitFile] = useState<CommitFile | null>(null);
-  const [commitDiff, setCommitDiff] = useState<FileDiff | null>(null);
-  const [commitDiffLoading, setCommitDiffLoading] = useState(false);
-  const [commitDiffError, setCommitDiffError] = useState<string | null>(null);
-
-  const commitDiffRequestId = useRef(0);
-  const commitDiffCache = useRef<Map<string, FileDiff>>(new Map());
+  /** 历史列表最上方的「未提交的变更」是否被选中 */
+  const [showUncommitted, setShowUncommitted] = useState(false);
 
   const loadMoreCommits = useCallback(async () => {
     if (logLoadingRef.current || !hasMoreRef.current) return;
@@ -361,57 +422,51 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
     }
   }, [activeTab, commits.length, loadMoreCommits]);
 
-  const handleSelectCommit = useCallback(async (commit: CommitInfo) => {
-    if (selectedCommit?.hash === commit.hash) return;
+  const handleSelectCommit = useCallback((commit: CommitInfo) => {
+    setShowUncommitted(false);
     setSelectedFolderFile(null);
     setSelectedCommit(commit);
-    setSelectedCommitFile(null);
-    setCommitDiff(null);
-    setCommitDiffError(null);
-    setFilesLoading(true);
-    setFilesError(null);
-    try {
-      const files = await getCommitFiles(commit.hash);
-      setCommitFiles(files);
-    } catch (e) {
-      setFilesError(e instanceof Error ? e.message : String(e));
-      setCommitFiles([]);
-    } finally {
-      setFilesLoading(false);
-    }
-  }, [selectedCommit]);
+    // 点击的正好是当前对比基准时，退出对比模式
+    setCompareFrom((prev) => (prev?.hash === commit.hash ? null : prev));
+  }, []);
 
-  const handleSelectCommitFile = useCallback(async (file: CommitFile) => {
-    if (!selectedCommit) return;
-    setSelectedCommitFile(file);
-    setCommitDiffError(null);
-
-    const cKey = `${selectedCommit.hash}:${file.path}`;
-    const cached = commitDiffCache.current.get(cKey);
-    if (cached) {
-      setCommitDiff(cached);
+  const handleSelectUncommitted = useCallback(() => {
+    if (showUncommitted) {
+      setShowUncommitted(false);
       return;
     }
-
-    const requestId = ++commitDiffRequestId.current;
-    setCommitDiff(null);
-    setCommitDiffLoading(true);
-    try {
-      const d = await getCommitFileDiff(selectedCommit.hash, file.path, file.old_path);
-      if (requestId === commitDiffRequestId.current) {
-        commitDiffCache.current.set(cKey, d);
-        setCommitDiff(d);
-      }
-    } catch (e) {
-      if (requestId === commitDiffRequestId.current) {
-        setCommitDiffError(e instanceof Error ? e.message : String(e));
-      }
-    } finally {
-      if (requestId === commitDiffRequestId.current) {
-        setCommitDiffLoading(false);
-      }
+    setSelectedCommit(null);
+    setSelectedFolderFile(null);
+    setCompareFrom(null);
+    // 存在冲突时直接打开第一个冲突文件，进入可视化解决界面
+    const conflictFile = status
+      ? [...status.unstaged, ...status.staged].find(
+          (f) =>
+            f.status === "conflict" ||
+            f.staged_status === "conflict" ||
+            f.unstaged_status === "conflict",
+        )
+      : undefined;
+    if (conflictFile) {
+      setSelectedFile(conflictFile);
+      setRightPanelMode("diff");
+    } else {
+      setSelectedFile(null);
+      setRightPanelMode("all");
     }
-  }, [selectedCommit]);
+    setShowUncommitted(true);
+  }, [showUncommitted, status]);
+
+  /** 设置 / 取消提交间对比基准 */
+  const handleToggleCompareBase = useCallback((commit: CommitInfo) => {
+    setShowUncommitted(false);
+    setSelectedFolderFile(null);
+    setCompareFrom((prev) => {
+      if (prev?.hash === commit.hash) return null;
+      return commit;
+    });
+    setSelectedCommit((prev) => (prev?.hash === commit.hash ? null : prev));
+  }, []);
 
   // Client-side filter for commit list
   const filteredCommits = useMemo(() => {
@@ -475,7 +530,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
     [],
   );
 
-  /** 第二步：用户在确认框点击"确认" → 执行实际的 git 撤销 */
+  /** 用户在确认框点击"确认" → 执行实际的 git 撤销 */
   const handleRevertConfirm = useCallback(async () => {
     if (!revertPending) return;
     const { file, scope } = revertPending;
@@ -530,7 +585,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
       await discardAllUnstaged();
       setSelectedFile(null);
       setDiff(null);
-      setRightPanelMode("diff");
+      setRightPanelMode("all");
       await loadStatus();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -584,9 +639,9 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
       hasMoreRef.current = page.length >= limit;
       setHasMore(hasMoreRef.current);
       setCommits(page);
-      commitDiffCache.current.clear();
       // 同步刷新选中提交（保持选中，即使提交信息已变化）
       setSelectedCommit((prev) => (prev ? page.find((c) => c.hash === prev.hash) ?? prev : prev));
+      setCompareFrom((prev) => (prev ? page.find((c) => c.hash === prev.hash) ?? prev : prev));
     } catch (e) {
       setLogError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -737,6 +792,170 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
     [branchBusy, repo.branch, loadStatus, refreshHistory],
   );
 
+  /** 刷新分支下拉列表 */
+  const refreshBranches = useCallback(() => {
+    getBranches()
+      .then((list) => setBranches(list))
+      .catch(() => setBranches(null));
+  }, []);
+
+  /** 打开分支操作弹窗（合并 / 变基 / 删除 / 重命名） */
+  const openBranchAction = useCallback(
+    (type: "merge" | "rebase" | "delete" | "rename", name: string) => {
+      setBranchMenuOpen(false);
+      setBranchActionError(null);
+      setBranchActionInput(name);
+      setBranchAction({ type, name });
+    },
+    [],
+  );
+
+  const closeBranchAction = useCallback(() => {
+    if (branchActionBusy) return;
+    setBranchAction(null);
+    setBranchActionError(null);
+  }, [branchActionBusy]);
+
+  /** 执行分支操作 */
+  const handleBranchActionSubmit = useCallback(async () => {
+    if (!branchAction || branchActionBusy) return;
+    const { type, name } = branchAction;
+    const value = branchActionInput.trim();
+
+    if (type === "rename" && !value) {
+      setBranchActionError("请输入新的分支名称");
+      return;
+    }
+
+    setBranchActionBusy(true);
+    setBranchActionError(null);
+    setError(null);
+    try {
+      if (type === "rename") {
+        await renameBranch(name, value);
+        if (name === repo.branch) {
+          // 当前分支改名后重新读取仓库信息，同步顶部徽标
+          const info = await openRepository(repo.path);
+          saveCurrentRepo(info);
+          onRepoUpdate(info);
+        }
+      } else if (type === "merge") {
+        await mergeBranch(name);
+      } else if (type === "rebase") {
+        await rebaseBranch(name);
+      } else {
+        await deleteBranch(name, false);
+      }
+
+      setBranchAction(null);
+      refreshBranches();
+      await loadStatus();
+      await refreshHistory();
+      setFolderRefreshKey((k) => k + 1);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      if (type === "rename") {
+        setBranchActionError(message);
+      } else {
+        setBranchAction(null);
+        // 合并 / 变基失败通常是产生了冲突，需要刷新状态让冲突文件出现在列表中
+        const latest = await loadStatus();
+        refreshBranches();
+        setError(message);
+        if (statusHasConflicts(latest)) {
+          setShowUncommitted(true);
+          setSelectedCommit(null);
+          setCompareFrom(null);
+          setSelectedFile(null);
+          setRightPanelMode("all");
+        }
+      }
+    } finally {
+      setBranchActionBusy(false);
+    }
+  }, [
+    branchAction,
+    branchActionBusy,
+    branchActionInput,
+    repo.branch,
+    repo.path,
+    onRepoUpdate,
+    refreshBranches,
+    loadStatus,
+    refreshHistory,
+  ]);
+
+  /** 冲突文件保存 / 标记已解决后刷新状态，并自动跳到下一个冲突 */
+  const handleConflictResolved = useCallback(async () => {
+    setDiff(null);
+    const latest = await loadStatus();
+    const nextConflict = latest
+      ? [...latest.unstaged, ...latest.staged].find(
+          (f) =>
+            f.status === "conflict" ||
+            f.staged_status === "conflict" ||
+            f.unstaged_status === "conflict",
+        )
+      : undefined;
+    if (nextConflict) {
+      setSelectedFile(nextConflict);
+      setRightPanelMode("diff");
+    } else {
+      setSelectedFile(null);
+      setRightPanelMode("all");
+    }
+    await refreshHistory();
+    setFolderRefreshKey((k) => k + 1);
+  }, [loadStatus, refreshHistory]);
+
+  /** 撤销最近一次提交（soft reset，内容保留在暂存区） */
+  const handleUndoCommit = useCallback(async () => {
+    if (gitBusy) return;
+    setConfirmUndoCommit(false);
+    setGitBusy(true);
+    setError(null);
+    try {
+      await undoLastCommit();
+      setSelectedCommit(null);
+      setCompareFrom(null);
+      await loadStatus();
+      await refreshHistory();
+      setFolderRefreshKey((k) => k + 1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setGitBusy(false);
+    }
+  }, [gitBusy, loadStatus, refreshHistory]);
+
+  /** 确认 cherry-pick 选中的提交 */
+  const handleCherryPickConfirm = useCallback(async () => {
+    if (!cherryPickTarget || gitBusy) return;
+    const target = cherryPickTarget;
+    setCherryPickTarget(null);
+    setGitBusy(true);
+    setError(null);
+    try {
+      await cherryPickCommit(target.hash);
+      await loadStatus();
+      await refreshHistory();
+      setFolderRefreshKey((k) => k + 1);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      const latest = await loadStatus();
+      setError(message);
+      if (statusHasConflicts(latest)) {
+        setShowUncommitted(true);
+        setSelectedCommit(null);
+        setCompareFrom(null);
+        setSelectedFile(null);
+        setRightPanelMode("all");
+      }
+    } finally {
+      setGitBusy(false);
+    }
+  }, [cherryPickTarget, gitBusy, loadStatus, refreshHistory]);
+
   const closeToolDialog = useCallback(() => {
     if (toolBusy) return;
     setToolAction(null);
@@ -782,18 +1001,30 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
     }
   }, [toolAction, toolBusy, toolInput, repo.path, onRepoUpdate, loadStatus, refreshHistory]);
 
-  /** 提交暂存区内容 */
+  /** 提交暂存区内容；Amend 模式下修正上一次提交 */
   const handleCommit = useCallback(async () => {
     const message = commitMessage.trim();
-    if (!message || committing) return;
+    const stagedCount = status?.staged.length ?? 0;
+    if (committing) return;
+    if (amendMode) {
+      // Amend 允许只改提交信息，也允许只追加暂存内容（沿用原信息）
+      if (!message && stagedCount === 0) return;
+    } else if (!message) {
+      return;
+    }
     setCommitting(true);
     setError(null);
     try {
-      await commitChanges(message);
+      if (amendMode) {
+        await amendCommit(message || undefined);
+      } else {
+        await commitChanges(message);
+      }
       setCommitMessage("");
+      setAmendMode(false);
       setSelectedFile(null);
       setDiff(null);
-      setRightPanelMode("diff");
+      setRightPanelMode("all");
       await loadStatus();
       await refreshHistory();
       setFolderRefreshKey((k) => k + 1);
@@ -802,7 +1033,28 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
     } finally {
       setCommitting(false);
     }
-  }, [commitMessage, committing, loadStatus, refreshHistory]);
+  }, [amendMode, commitMessage, committing, status?.staged.length, loadStatus, refreshHistory]);
+
+  const isMac = useMemo(() => {
+    return typeof navigator !== "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.platform);
+  }, []);
+
+  /** 在提交信息框按 Ctrl+Enter (Mac 为 ⌘+Enter) 快捷提交 */
+  const handleCommitKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault();
+        const stagedCount = status?.staged.length ?? 0;
+        const canSubmit = amendMode
+          ? commitMessage.trim().length > 0 || stagedCount > 0
+          : commitMessage.trim().length > 0 && stagedCount > 0;
+        if (!committing && canSubmit) {
+          handleCommit();
+        }
+      }
+    },
+    [amendMode, commitMessage, committing, status?.staged.length, handleCommit]
+  );
 
   /** 同步到远程仓库（落后时先快进拉取，再推送本地提交） */
   const handleSync = useCallback(async () => {
@@ -875,9 +1127,55 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
     return () => window.removeEventListener("focus", handleFocus);
   }, []);
 
-  const changesCount = status ? status.staged.length + status.unstaged.length : 0;
+  // ── 文件系统监听：工作区文件变化时自动刷新变更 / 历史 / 目录树 ─────
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+
+    listen("repo-changed", () => {
+      // 应用自身的 Git 操作刚刷新过状态时，忽略紧随其后的文件事件
+      if (Date.now() - lastStatusLoadRef.current < 1200) return;
+      handleAutoRefreshRef.current();
+    })
+      .then((fn) => {
+        if (disposed) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {
+        // 监听注册失败时退化为窗口焦点刷新
+      });
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  const changesCount = status
+    ? new Set([...status.staged, ...status.unstaged].map((f) => f.path)).size
+    : 0;
+  /** 未解决冲突的文件数（去重） */
+  const conflictCount = status
+    ? new Set(
+        [...status.staged, ...status.unstaged]
+          .filter(
+            (f) =>
+              f.status === "conflict" ||
+              f.staged_status === "conflict" ||
+              f.unstaged_status === "conflict",
+          )
+          .map((f) => f.path),
+      ).size
+    : 0;
   // 暂存区为空且本地领先远程时，主按钮切换为「同步到远程」
   const showSync = (syncStatus?.ahead ?? 0) > 0 && (status?.staged.length ?? 0) === 0;
+
+  /** 当前选中的文件是否处于合并冲突状态 */
+  const selectedFileIsConflict = selectedFile
+    ? selectedFile.status === "conflict" ||
+      selectedFile.staged_status === "conflict" ||
+      selectedFile.unstaged_status === "conflict"
+    : false;
 
   return (
     <div className="app-shell">
@@ -895,7 +1193,24 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
         onOpenFile={handleProjectFileClick}
         onOpenOther={handleOpenOtherRepo}
         onRemove={handleRemoveRecentRepo}
+        width={projectSidebarWidth}
+        onCollapsedChange={setProjectSidebarCollapsed}
       />
+      {!projectSidebarCollapsed && (
+        <SidebarResizeHandle
+          width={projectSidebarWidth}
+          min={PROJECT_SIDEBAR_MIN_WIDTH}
+          max={PROJECT_SIDEBAR_MAX_WIDTH}
+          onWidthChange={setProjectSidebarWidth}
+          onResizeEnd={(width) => persistWidth(PROJECT_SIDEBAR_WIDTH_KEY, width)}
+          onReset={() => {
+            setProjectSidebarWidth(PROJECT_SIDEBAR_DEFAULT_WIDTH);
+            persistWidth(PROJECT_SIDEBAR_WIDTH_KEY, PROJECT_SIDEBAR_DEFAULT_WIDTH);
+          }}
+          showLine={false}
+          title="拖拽调整项目侧边栏宽度，双击恢复默认"
+        />
+      )}
 
       <div className="app-main">
       {/* ── Toolbar (clean, global actions only) ──────────────────── */}
@@ -930,20 +1245,62 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                 branches.local.map((name) => {
                   const isCurrent = name === branches.current || (!branches.current && name === repo.branch);
                   return (
-                    <button
+                    <div
                       key={`local:${name}`}
-                      type="button"
-                      className={`branch-menu-item ${isCurrent ? "current" : ""}`}
-                      onClick={() => handleCheckoutBranch(name, false)}
+                      className={`branch-menu-row ${isCurrent ? "current" : ""}`}
                     >
-                      {isCurrent ? (
-                        <Check size={12} style={{ flexShrink: 0 }} />
-                      ) : (
-                        <GitBranch size={12} style={{ flexShrink: 0, opacity: 0.6 }} />
-                      )}
-                      <span className="branch-menu-name">{name}</span>
-                      {isCurrent && <span className="branch-menu-tag">当前</span>}
-                    </button>
+                      <button
+                        type="button"
+                        className={`branch-menu-item ${isCurrent ? "current" : ""}`}
+                        onClick={() => handleCheckoutBranch(name, false)}
+                      >
+                        {isCurrent ? (
+                          <Check size={12} style={{ flexShrink: 0 }} />
+                        ) : (
+                          <GitBranch size={12} style={{ flexShrink: 0, opacity: 0.6 }} />
+                        )}
+                        <span className="branch-menu-name">{name}</span>
+                        {isCurrent && <span className="branch-menu-tag">当前</span>}
+                      </button>
+                      <div className="branch-menu-actions">
+                        <button
+                          type="button"
+                          className="branch-menu-action"
+                          disabled={branchBusy || isCurrent}
+                          title={isCurrent ? "不能合并当前分支" : `把 ${name} 合并到当前分支`}
+                          onClick={() => openBranchAction("merge", name)}
+                        >
+                          <GitMerge size={12} />
+                        </button>
+                        <button
+                          type="button"
+                          className="branch-menu-action"
+                          disabled={branchBusy || isCurrent}
+                          title={isCurrent ? "不能变基到当前分支" : `把当前分支变基到 ${name}`}
+                          onClick={() => openBranchAction("rebase", name)}
+                        >
+                          <RotateCw size={12} />
+                        </button>
+                        <button
+                          type="button"
+                          className="branch-menu-action"
+                          disabled={branchBusy}
+                          title={`重命名分支 ${name}`}
+                          onClick={() => openBranchAction("rename", name)}
+                        >
+                          <Pencil size={12} />
+                        </button>
+                        <button
+                          type="button"
+                          className="branch-menu-action danger"
+                          disabled={branchBusy || isCurrent}
+                          title={isCurrent ? "不能删除当前分支" : `删除分支 ${name}`}
+                          onClick={() => openBranchAction("delete", name)}
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    </div>
                   );
                 })
               )}
@@ -990,6 +1347,11 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
               <Download size={14} />
             )}
             <span>拉取</span>
+            {syncStatus && syncStatus.behind > 0 && (
+              <span className="toolbar-badge" title={`待拉取 ${syncStatus.behind} 个提交`}>
+                {syncStatus.behind}
+              </span>
+            )}
           </button>
           <button
             className="toolbar-btn"
@@ -1014,6 +1376,11 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
               <Upload size={14} />
             )}
             <span>推送</span>
+            {syncStatus && syncStatus.ahead > 0 && (
+              <span className="toolbar-badge" title={`待推送 ${syncStatus.ahead} 个提交`}>
+                {syncStatus.ahead}
+              </span>
+            )}
           </button>
           <button
             className="toolbar-btn"
@@ -1081,6 +1448,25 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                   <ArchiveRestore size={13} />
                   <span>贮藏列表 / 恢复</span>
                 </button>
+                <div className="toolbar-menu-divider" />
+                <button
+                  type="button"
+                  className="toolbar-menu-item"
+                  role="menuitem"
+                  disabled={gitBusy || commits.length === 0}
+                  title={
+                    commits.length === 0
+                      ? "当前仓库还没有提交"
+                      : "撤销最近一次提交，内容保留在暂存区 (git reset --soft HEAD~1)"
+                  }
+                  onClick={() => {
+                    setToolMenuOpen(false);
+                    setConfirmUndoCommit(true);
+                  }}
+                >
+                  <RotateCcw size={13} />
+                  <span>撤销上次提交</span>
+                </button>
               </div>
             )}
           </div>
@@ -1143,118 +1529,69 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
         </div>
       </div>
 
+      {error && !showUncommitted && (
+        <div className="global-error-bar">
+          <AlertTriangle size={13} />
+          <span>{error}</span>
+          <button
+            type="button"
+            className="global-error-close"
+            onClick={() => setError(null)}
+            title="关闭"
+          >
+            <X size={12} />
+          </button>
+        </div>
+      )}
+
       {/* ── Main Layout ─────────────────────────────────────────── */}
       <div className="main-content">
         {/* ── Sidebar (Column 1) ─────────────────────────────────── */}
-        <div className="sidebar">
-          {/* Top of Sidebar: Mode B (Tabs on top, Search box immediately below) */}
+        <div className="sidebar" style={{ width: commitSidebarWidth }}>
+          {/* Top of Sidebar: 提交记录（变更 tab 暂时隐藏） */}
           <div className="sidebar-tabs-container">
             <div className="sidebar-tabs" role="tablist">
               <button
                 type="button"
                 role="tab"
-                aria-selected={activeTab === "changes"}
-                className={`sidebar-tab ${activeTab === "changes" ? "active" : ""}`}
-                onClick={() => {
-                  setActiveTab("changes");
-                  setFilter("");
-                }}
+                aria-selected
+                className="sidebar-tab active"
               >
-                <span>变更</span>
-                {changesCount > 0 && (
-                  <span className="sidebar-tab-badge">{changesCount}</span>
-                )}
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeTab === "history"}
-                className={`sidebar-tab ${activeTab === "history" ? "active" : ""}`}
-                onClick={() => {
-                  setActiveTab("history");
-                  setFilter("");
-                }}
-              >
-                <span>历史</span>
+                <GitCommit size={14} />
+                <span>提交记录</span>
               </button>
             </div>
           </div>
 
-          {/* 变更 tab：提交信息输入 + 提交按钮；其他 tab：搜索框 */}
-          {activeTab === "changes" ? (
-            showSync ? (
-              <div className="sidebar-commit">
-                <div className="sidebar-commit-hint">
-                  {syncStatus && syncStatus.behind > 0
-                    ? `本地领先 ${syncStatus.ahead} 个提交，落后 ${syncStatus.behind} 个提交`
-                    : `本地领先远程 ${syncStatus?.ahead ?? 0} 个提交`}
-                </div>
-                <button
-                  type="button"
-                  className="sidebar-commit-btn"
-                  onClick={handleSync}
-                  disabled={syncing}
-                  title="同步到远程仓库 (Sync Changes)"
-                >
-                  <FolderSync size={14} />
-                  <span>{syncing ? "同步中..." : "Sync Changes 同步"}</span>
-                </button>
-              </div>
-            ) : (
-              <div className="sidebar-commit">
-                <textarea
-                  className="sidebar-commit-input"
-                  placeholder="提交信息 (Commit message)"
-                  value={commitMessage}
-                  onChange={(e) => setCommitMessage(e.target.value)}
-                  rows={2}
-                  spellCheck={false}
-                />
-                <button
-                  type="button"
-                  className="sidebar-commit-btn"
-                  onClick={handleCommit}
-                  disabled={
-                    !commitMessage.trim() || committing || (status?.staged.length ?? 0) === 0
-                  }
-                  title={
-                    (status?.staged.length ?? 0) === 0
-                      ? "请先暂存变更后再提交"
-                      : "提交暂存区内容 (Commit)"
-                  }
-                >
-                  <GitCommit size={14} />
-                  <span>{committing ? "提交中..." : "Commit 提交"}</span>
-                </button>
-              </div>
-            )
-          ) : (
-            <div className="sidebar-search">
-              <Search size={14} className="sidebar-search-icon" />
-              <input
-                type="text"
-                className="sidebar-search-input"
-                placeholder="搜索提交记录、作者、哈希..."
-                value={filter}
-                onChange={(e) => setFilter(e.target.value)}
-              />
-            </div>
-          )}
+          <div className="sidebar-search">
+            <Search size={14} className="sidebar-search-icon" />
+            <input
+              type="text"
+              className="sidebar-search-input"
+              placeholder="搜索提交记录、作者、哈希..."
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+            />
+          </div>
 
-          {/* Sidebar Body */}
-          {activeTab === "changes" && (
-            <>
-              {error && <div className="error-message">{error}</div>}
-              {loading && !status && (
-                <div className="loading" style={{ padding: 24 }}>
-                  <div className="loading-spinner" />
-                  <span>正在获取仓库状态...</span>
-                </div>
-              )}
-              {status && (
+          {logError && <div className="error-message">{logError}</div>}
+          <CommitList
+            commits={filteredCommits}
+            selectedHash={selectedCommit?.hash ?? null}
+            loading={logLoading}
+            hasMore={hasMore && !filter.trim()}
+            onSelect={handleSelectCommit}
+            onLoadMore={loadMoreCommits}
+            uncommittedCount={changesCount}
+            uncommittedSelected={showUncommitted}
+            onSelectUncommitted={handleSelectUncommitted}
+            compareBaseHash={compareFrom?.hash ?? null}
+            onToggleCompareBase={handleToggleCompareBase}
+            uncommittedContent={
+              status ? (
                 <FileList
                   status={status}
-                  selectedPath={selectedFile?.path || null}
+                  selectedPath={selectedFile?.path ?? null}
                   onSelect={handleSelectChangedFile}
                   onRevert={handleRevert}
                   onStage={handleStage}
@@ -1264,153 +1601,349 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                   onStageAll={handleStageAll}
                   onDiscardAll={() => setConfirmDiscardAll(true)}
                 />
-              )}
-            </>
-          )}
-
-          {activeTab === "history" && (
-            <>
-              {logError && <div className="error-message">{logError}</div>}
-              <CommitList
-                commits={filteredCommits}
-                selectedHash={selectedCommit?.hash ?? null}
-                loading={logLoading}
-                hasMore={hasMore && !filter.trim()}
-                onSelect={handleSelectCommit}
-                onLoadMore={loadMoreCommits}
-              />
-            </>
-          )}
+              ) : undefined
+            }
+          />
         </div>
 
-        {/* ── Content Area: Changes Mode vs History Mode ─────────── */}
-        {activeTab === "changes" && !selectedFolderFile && (
-          <div className="diff-viewer">
-            {rightPanelMode === "all" && status && <AllChangesView status={status} />}
-
-            {!selectedFile && rightPanelMode !== "all" && (
-              <div className="empty-state">
-                <div className="empty-state-icon-wrapper">
-                  <FileCode2 size={32} strokeWidth={1.5} />
-                </div>
-                <div className="empty-state-text">选择一个变更文件以查看 Diff</div>
-                <div className="empty-state-sub">支持工作区与暂存区对比</div>
-              </div>
-            )}
-
-            {selectedFile && rightPanelMode === "file" && (
-              <div className="changes-file-preview">
-                <div className="changes-file-preview-bar">
-                  <button
-                    type="button"
-                    className="changes-file-preview-switch"
-                    onClick={() => setRightPanelMode("diff")}
-                  >
-                    <Diff size={13} />
-                    <span>查看变更对比</span>
-                  </button>
-                </div>
-                <FilePreview
-                  fullPath={selectedFileFullPath}
-                  relPath={selectedFile.path}
-                  change={selectedFile}
-                />
-              </div>
-            )}
-
-            {selectedFile && rightPanelMode === "diff" && diffLoading && (
-              <div className="diff-loading">
-                <Loader2 size={13} className="spin" />
-                <span>正在读取 Diff...</span>
-              </div>
-            )}
-
-            {selectedFile && rightPanelMode === "diff" && !diffLoading && diffError && (
-              <div className="empty-state">
-                <div className="empty-state-icon-wrapper" style={{ color: "var(--error-color)" }}>
-                  <AlertTriangle size={32} strokeWidth={1.5} />
-                </div>
-                <div className="empty-state-text">Diff 加载失败</div>
-                <div style={{ fontSize: 12, color: "var(--error-color)", maxWidth: 400, textAlign: "center" }}>
-                  {diffError}
-                </div>
-              </div>
-            )}
-
-            {selectedFile && rightPanelMode === "diff" && !diffError && diff && (
-              <DiffViewer
-                diff={diff}
-                file={selectedFile}
-                view={diffView}
-                onViewChange={setDiffView}
-                repoPath={repo.path}
-              />
-            )}
-          </div>
-        )}
+        <SidebarResizeHandle
+          width={commitSidebarWidth}
+          min={COMMIT_SIDEBAR_MIN_WIDTH}
+          max={COMMIT_SIDEBAR_MAX_WIDTH}
+          onWidthChange={setCommitSidebarWidth}
+          onResizeEnd={(width) => persistWidth(COMMIT_SIDEBAR_WIDTH_KEY, width)}
+          onReset={() => {
+            setCommitSidebarWidth(COMMIT_SIDEBAR_DEFAULT_WIDTH);
+            persistWidth(COMMIT_SIDEBAR_WIDTH_KEY, COMMIT_SIDEBAR_DEFAULT_WIDTH);
+          }}
+          title="拖拽调整提交列表宽度，双击恢复默认"
+        />
 
         {activeTab === "history" && !selectedFolderFile && (
           <div className="history-main-content">
-            {/* Column 2 in History Mode: Commit details & changed files */}
-            <div className="history-detail-panel">
-              {!selectedCommit ? (
-                <div className="empty-state">
-                  <div className="empty-state-icon-wrapper">
-                    <GitCommit size={32} strokeWidth={1.5} />
-                  </div>
-                  <div className="empty-state-text">选择一条提交记录</div>
-                  <div className="empty-state-sub">查看该次提交的变更文件与信息</div>
-                </div>
-              ) : (
-                <CommitDetail
-                  commit={selectedCommit}
-                  files={commitFiles}
-                  filesLoading={filesLoading}
-                  filesError={filesError}
-                  selectedFilePath={selectedCommitFile?.path ?? null}
-                  diff={commitDiff}
-                  diffLoading={commitDiffLoading}
-                  diffError={commitDiffError}
-                  onSelectFile={handleSelectCommitFile}
-                />
-              )}
-            </div>
+            {showUncommitted ? (
+              <div className="uncommitted-changes-panel">
+                <div className="uncommitted-commit-bar">
+                  <div className="uncommitted-header">
+                    <div className="uncommitted-header-left">
+                      <span className="uncommitted-header-title">
+                        <FileCode2 size={14} />
+                        <span>未提交的变更</span>
+                        <span className="uncommitted-header-count" title="总变更文件数">
+                          {changesCount}
+                        </span>
+                      </span>
+                      {status && (
+                        <div className="uncommitted-header-tags">
+                          <span
+                            className={`uncommitted-tag staged ${status.staged.length > 0 ? "has-items" : ""}`}
+                            title={`${status.staged.length} 个文件已暂存，将包含在此次提交中`}
+                          >
+                            已暂存 {status.staged.length}
+                          </span>
+                          <span
+                            className={`uncommitted-tag unstaged ${status.unstaged.length > 0 ? "has-items" : ""}`}
+                            title={`${status.unstaged.length} 个文件在工作区未暂存`}
+                          >
+                            未暂存 {status.unstaged.length}
+                          </span>
+                          {conflictCount > 0 && (
+                            <span
+                              className="uncommitted-tag conflict has-items"
+                              title="存在未解决的合并冲突，点击左侧带「!」标记的文件进行可视化解决"
+                            >
+                              冲突 {conflictCount}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
 
-            {/* Column 3 in History Mode: Diff viewer */}
-            <div className="history-diff-panel">
-              {!selectedCommitFile ? (
-                <div className="empty-state">
-                  <div className="empty-state-icon-wrapper">
-                    <FileCode2 size={32} strokeWidth={1.5} />
+                    <div className="uncommitted-header-actions">
+                      <button
+                        type="button"
+                        className="uncommitted-toolbar-btn"
+                        onClick={handleStageAll}
+                        disabled={changesCount === 0 || (status?.unstaged.length ?? 0) === 0}
+                        title="暂存所有工作区修改 (git add -A)"
+                      >
+                        <Plus size={13} />
+                        <span>暂存全部</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        className="uncommitted-toolbar-btn danger"
+                        onClick={() => setConfirmDiscardAll(true)}
+                        disabled={changesCount === 0 || (status?.unstaged.length ?? 0) === 0}
+                        title="放弃所有工作区修改"
+                      >
+                        <Undo2 size={13} />
+                        <span>放弃全部</span>
+                      </button>
+
+                      {showSync && (
+                        <>
+                          <div className="uncommitted-header-divider" />
+                          <button
+                            type="button"
+                            className="uncommitted-sync-btn"
+                            onClick={handleSync}
+                            disabled={syncing}
+                            title="同步到远程仓库 (Sync Changes)"
+                          >
+                            <FolderSync size={13} />
+                            <span>{syncing ? "同步中..." : "Sync Changes"}</span>
+                            {syncStatus && syncStatus.ahead > 0 && (
+                              <span className="uncommitted-sync-count" title={`待同步 ${syncStatus.ahead} 个提交`}>
+                                {syncStatus.ahead}
+                              </span>
+                            )}
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
-                  <div className="empty-state-text">选择一个文件查看 Diff</div>
-                  <div className="empty-state-sub">查看该文件在本次提交中的改动</div>
+
+                  <div className="uncommitted-commit-row">
+                    <div className="uncommitted-commit-input-wrap">
+                      <textarea
+                        className="uncommitted-commit-input"
+                        placeholder={
+                          amendMode
+                            ? "修正上一次提交：留空则沿用原提交信息..."
+                            : (status?.staged.length ?? 0) === 0
+                              ? `输入提交信息... (提示: 暂存变更后按 ${isMac ? "⌘+Enter" : "Ctrl+Enter"} 提交)`
+                              : `输入提交信息 (按 ${isMac ? "⌘+Enter" : "Ctrl+Enter"} 提交)...`
+                        }
+                        value={commitMessage}
+                        onChange={(e) => setCommitMessage(e.target.value)}
+                        onKeyDown={handleCommitKeyDown}
+                        rows={2}
+                        spellCheck={false}
+                      />
+                    </div>
+
+                    <button
+                      type="button"
+                      className={`uncommitted-amend-toggle ${amendMode ? "active" : ""}`}
+                      onClick={() => setAmendMode((v) => !v)}
+                      disabled={committing || commits.length === 0}
+                      title={
+                        commits.length === 0
+                          ? "当前仓库还没有提交，无法 Amend"
+                          : amendMode
+                            ? "退出修正模式"
+                            : "修正上一次提交 (git commit --amend)"
+                      }
+                    >
+                      <Pencil size={13} />
+                      <span>Amend</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      className="uncommitted-commit-btn"
+                      onClick={handleCommit}
+                      disabled={
+                        committing ||
+                        (amendMode
+                          ? !commitMessage.trim() && (status?.staged.length ?? 0) === 0
+                          : !commitMessage.trim() || (status?.staged.length ?? 0) === 0)
+                      }
+                      title={
+                        amendMode
+                          ? (status?.staged.length ?? 0) === 0
+                            ? "将只修改上一次提交的信息 (git commit --amend --no-edit/-m)"
+                            : `修正上一次提交（含 ${status?.staged.length} 个已暂存文件）(${isMac ? "⌘+Enter" : "Ctrl+Enter"})`
+                          : (status?.staged.length ?? 0) === 0
+                            ? "暂存区为空，请先点击上方「暂存全部」或在左侧暂存文件后再提交"
+                            : !commitMessage.trim()
+                              ? "请输入提交信息"
+                              : `提交 ${status?.staged.length} 个已暂存文件 (${isMac ? "⌘+Enter" : "Ctrl+Enter"})`
+                      }
+                    >
+                      <div className="uncommitted-commit-btn-content">
+                        {committing ? (
+                          <Loader2 size={14} className="spin" />
+                        ) : amendMode ? (
+                          <Pencil size={15} />
+                        ) : (
+                          <GitCommit size={15} />
+                        )}
+                        <span>
+                          {committing
+                            ? "提交中..."
+                            : amendMode
+                              ? "Amend 修正提交"
+                              : "Commit 提交"}
+                        </span>
+                      </div>
+                      {(status?.staged.length ?? 0) > 0 ? (
+                        <span className="uncommitted-commit-btn-badge">
+                          {status?.staged.length} 个文件 ·{" "}
+                          {amendMode ? "修正上次提交" : isMac ? "⌘↵" : "Ctrl+↵"}
+                        </span>
+                      ) : (
+                        <span className="uncommitted-commit-btn-badge muted">
+                          {amendMode ? "沿用上次提交信息" : "暂存区为空"}
+                        </span>
+                      )}
+                    </button>
+                  </div>
                 </div>
-              ) : (
-                <>
-                  {commitDiffLoading && (
-                    <div className="diff-loading">
-                      <Loader2 size={13} className="spin" />
-                      <span>正在读取 Diff...</span>
+
+                {error && (
+                  <div className="error-message" style={{ margin: "10px 12px 0" }}>
+                    {error}
+                  </div>
+                )}
+
+                <div className="uncommitted-body">
+                  {status ? (
+                    <div className="uncommitted-diff-area">
+                        {rightPanelMode === "all" && (
+                          <AllChangesView status={status} title="变更文件" />
+                        )}
+
+                        {!selectedFile && rightPanelMode !== "all" && (
+                          <div className="empty-state">
+                            <div className="empty-state-icon-wrapper">
+                              <FileCode2 size={32} strokeWidth={1.5} />
+                            </div>
+                            <div className="empty-state-text">选择一个变更文件以查看 Diff</div>
+                            <div className="empty-state-sub">支持工作区与暂存区对比</div>
+                          </div>
+                        )}
+
+                        {selectedFile && rightPanelMode === "file" && (
+                          <div className="changes-file-preview">
+                            <div className="changes-file-preview-bar">
+                              <button
+                                type="button"
+                                className="changes-file-preview-switch"
+                                onClick={() => setRightPanelMode("diff")}
+                              >
+                                <Diff size={13} />
+                                <span>查看变更对比</span>
+                              </button>
+                            </div>
+                            <FilePreview
+                              fullPath={selectedFileFullPath}
+                              relPath={selectedFile.path}
+                              change={selectedFile}
+                            />
+                          </div>
+                        )}
+
+                        {selectedFile && rightPanelMode === "diff" && selectedFileIsConflict && (
+                          <ConflictResolver
+                            filePath={selectedFile.path}
+                            onResolved={handleConflictResolved}
+                          />
+                        )}
+
+                        {selectedFile &&
+                          rightPanelMode === "diff" &&
+                          !selectedFileIsConflict &&
+                          diffLoading && (
+                          <div className="diff-loading">
+                            <Loader2 size={13} className="spin" />
+                            <span>正在读取 Diff...</span>
+                          </div>
+                        )}
+
+                        {selectedFile &&
+                          rightPanelMode === "diff" &&
+                          !selectedFileIsConflict &&
+                          !diffLoading &&
+                          diffError && (
+                            <div className="empty-state">
+                              <div
+                                className="empty-state-icon-wrapper"
+                                style={{ color: "var(--error-color)" }}
+                              >
+                                <AlertTriangle size={32} strokeWidth={1.5} />
+                              </div>
+                              <div className="empty-state-text">Diff 加载失败</div>
+                              <div
+                                style={{
+                                  fontSize: 12,
+                                  color: "var(--error-color)",
+                                  maxWidth: 400,
+                                  textAlign: "center",
+                                }}
+                              >
+                                {diffError}
+                              </div>
+                            </div>
+                          )}
+
+                        {selectedFile &&
+                          rightPanelMode === "diff" &&
+                          !selectedFileIsConflict &&
+                          !diffError &&
+                          diff && (
+                            <DiffViewer
+                              diff={diff}
+                              file={selectedFile}
+                              view={diffView}
+                              onViewChange={setDiffView}
+                              repoPath={repo.path}
+                            />
+                          )}
+                      </div>
+                  ) : (
+                    <div className="empty-state">
+                      <div className="empty-state-icon-wrapper">
+                        <Loader2 size={28} className="spin" />
+                      </div>
+                      <div className="empty-state-text">
+                        {loading ? "正在获取仓库状态..." : "暂无变更"}
+                      </div>
                     </div>
                   )}
-                  {!commitDiffLoading && commitDiff && (
-                    <DiffViewer
-                      diff={commitDiff}
-                      file={makeChangedFile(selectedCommitFile) as any}
-                      view="unstaged"
-                      onViewChange={() => {}}
-                      contextLabel="本次提交的改动"
-                    />
-                  )}
-                  {!commitDiffLoading && commitDiffError && (
-                    <div className="empty-state" style={{ padding: 32 }}>
-                      <div style={{ color: "var(--error-color)", fontSize: 13 }}>{commitDiffError}</div>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
+                </div>
+              </div>
+            ) : selectedCommit ? (
+              <CommitChangesView
+                commit={selectedCommit}
+                compareFrom={
+                  compareFrom && compareFrom.hash !== selectedCommit.hash
+                    ? compareFrom
+                    : undefined
+                }
+                onClearCompare={() => setCompareFrom(null)}
+                onCherryPick={setCherryPickTarget}
+              />
+            ) : compareFrom ? (
+              <div className="empty-state compare-empty-state">
+                <div className="empty-state-icon-wrapper">
+                  <GitCompare size={32} strokeWidth={1.5} />
+                </div>
+                <div className="empty-state-text">
+                  已选择对比基准 <code>{compareFrom.short_hash}</code>
+                </div>
+                <div className="empty-state-sub">
+                  点击另一条提交记录，查看两者之间的差异
+                </div>
+                <button
+                  type="button"
+                  className="compare-empty-cancel"
+                  onClick={() => setCompareFrom(null)}
+                >
+                  取消对比
+                </button>
+              </div>
+            ) : (
+              <div className="empty-state">
+                <div className="empty-state-icon-wrapper">
+                  <GitCommit size={32} strokeWidth={1.5} />
+                </div>
+                <div className="empty-state-text">选择一条提交记录</div>
+                <div className="empty-state-sub">查看提交信息与所有文件的连续 Diff</div>
+              </div>
+            )}
           </div>
         )}
 
@@ -1632,6 +2165,114 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
           cancelText="取消"
           onConfirm={handleStashDelete}
           onCancel={() => setStashConfirm(null)}
+        />
+      )}
+
+      {/* ── 分支操作：重命名输入弹窗 ─────────────────────────────── */}
+      {branchAction && branchAction.type === "rename" && (
+        <div className="confirm-overlay" onClick={closeBranchAction}>
+          <div
+            className="confirm-dialog"
+            role="dialog"
+            aria-modal="true"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="confirm-header">
+              <Pencil size={16} className="confirm-icon" style={{ color: "var(--accent-color)" }} />
+              <span className="confirm-title">重命名分支</span>
+            </div>
+            <div className="confirm-body">
+              <div className="dialog-hint">
+                将把本地分支「{branchAction.name}」重命名为：
+              </div>
+              <input
+                autoFocus
+                className="dialog-input"
+                type="text"
+                value={branchActionInput}
+                spellCheck={false}
+                placeholder="新的分支名称"
+                onChange={(e) => setBranchActionInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleBranchActionSubmit();
+                  if (e.key === "Escape") closeBranchAction();
+                }}
+              />
+              {branchActionError && <div className="dialog-error">{branchActionError}</div>}
+            </div>
+            <div className="confirm-actions">
+              <button
+                className="confirm-btn confirm-btn-cancel"
+                onClick={closeBranchAction}
+                disabled={branchActionBusy}
+              >
+                取消
+              </button>
+              <button
+                className="confirm-btn confirm-btn-primary"
+                onClick={handleBranchActionSubmit}
+                disabled={branchActionBusy || !branchActionInput.trim()}
+              >
+                {branchActionBusy ? "处理中..." : "重命名"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 分支操作：合并 / 变基 / 删除 确认 ───────────────────── */}
+      {branchAction && branchAction.type !== "rename" && (
+        <ConfirmDialog
+          title={
+            branchAction.type === "merge"
+              ? "确认合并分支"
+              : branchAction.type === "rebase"
+                ? "确认变基 (Rebase)"
+                : "确认删除分支"
+          }
+          message={
+            branchAction.type === "merge"
+              ? `将把分支「${branchAction.name}」合并到当前分支「${repo.branch}」。\n\n如果产生冲突，需要在未提交的变更中解决后再提交。`
+              : branchAction.type === "rebase"
+                ? `将把当前分支「${repo.branch}」变基到「${branchAction.name}」上。\n\n变基会重写当前分支的提交历史；如有冲突需要逐个解决。`
+                : `将删除本地分支「${branchAction.name}」。\n\n如果该分支尚未合并，Git 会拒绝删除。此操作不可恢复。`
+          }
+          confirmText={
+            branchAction.type === "merge"
+              ? "合并"
+              : branchAction.type === "rebase"
+                ? "变基"
+                : "删除分支"
+          }
+          cancelText="取消"
+          onConfirm={handleBranchActionSubmit}
+          onCancel={closeBranchAction}
+        />
+      )}
+
+      {/* ── 撤销上次提交确认 ─────────────────────────────────────── */}
+      {confirmUndoCommit && (
+        <ConfirmDialog
+          title="撤销上次提交"
+          message={
+            "将撤销最近一次提交（HEAD），提交内容会完整保留在暂存区，可修改后重新提交。\n\n此操作会改写当前分支的提交历史。"
+          }
+          confirmText="撤销提交"
+          cancelText="取消"
+          onConfirm={handleUndoCommit}
+          onCancel={() => setConfirmUndoCommit(false)}
+        />
+      )}
+
+      {/* ── Cherry-pick 确认 ────────────────────────────────────── */}
+      {cherryPickTarget && (
+        <ConfirmDialog
+          title="Cherry-pick 提交"
+          message={`将把提交 ${cherryPickTarget.short_hash}「${cherryPickTarget.subject || "(no message)"}」的改动应用到当前分支「${repo.branch}」。\n\n如果产生冲突，需要解决后再提交。`}
+          confirmText="Cherry-pick"
+          cancelText="取消"
+          onConfirm={handleCherryPickConfirm}
+          onCancel={() => setCherryPickTarget(null)}
         />
       )}
       </div>

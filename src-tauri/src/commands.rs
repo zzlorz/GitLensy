@@ -10,20 +10,39 @@ use crate::{diff, git, history, status, AppState};
 #[tauri::command]
 pub async fn open_repository(
     path: String,
+    app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> AppResult<RepositoryInfo> {
     let info = repository::open_repository(&path)?;
 
-    let mut repo_path = state.repo_path.lock().unwrap();
-    *repo_path = Some(info.path.clone());
+    {
+        let mut repo_path = state.repo_path.lock().unwrap();
+        *repo_path = Some(info.path.clone());
+    }
+
+    // 开始监听仓库文件变化。监听失败不应阻止仓库打开（例如权限受限的目录）。
+    match crate::watcher::start(app, &info.path) {
+        Ok(watcher) => {
+            let mut slot = state.watcher.lock().unwrap();
+            *slot = Some(watcher);
+        }
+        Err(e) => {
+            eprintln!("failed to watch repository {}: {}", info.path, e);
+            *state.watcher.lock().unwrap() = None;
+        }
+    }
 
     Ok(info)
 }
 
 #[tauri::command]
 pub async fn close_repository(state: State<'_, AppState>) -> Result<(), String> {
-    let mut repo_path = state.repo_path.lock().unwrap();
-    *repo_path = None;
+    {
+        let mut repo_path = state.repo_path.lock().unwrap();
+        *repo_path = None;
+    }
+    // 关闭仓库时停止文件监听
+    *state.watcher.lock().unwrap() = None;
     Ok(())
 }
 
@@ -1019,4 +1038,281 @@ pub async fn checkout_branch(
         git::run_git(path, &["checkout", &name])?;
     }
     Ok(())
+}
+
+// ── 仓库路径与路径安全辅助 ─────────────────────────────────────────────
+
+fn repo_path_of(state: &State<'_, AppState>) -> AppResult<String> {
+    let repo_path = state.repo_path.lock().unwrap();
+    repo_path
+        .as_ref()
+        .ok_or(crate::error::AppError::NoRepository)
+        .cloned()
+}
+
+/// 把 Git 返回的相对路径安全地拼到仓库根目录下，拒绝绝对路径、盘符前缀与 `..` 穿越。
+fn safe_repo_file(root: &str, rel: &str) -> AppResult<std::path::PathBuf> {
+    if rel.trim().is_empty() {
+        return Err(AppError::ParseError("文件路径不能为空".to_string()));
+    }
+
+    for component in Path::new(rel).components() {
+        match component {
+            std::path::Component::Normal(_) | std::path::Component::CurDir => {}
+            _ => {
+                return Err(AppError::ParseError(format!("非法的文件路径：{}", rel)));
+            }
+        }
+    }
+
+    Ok(Path::new(root).join(rel))
+}
+
+fn validate_branch_name(repo: &Path, name: &str) -> AppResult<()> {
+    if name.is_empty() {
+        return Err(AppError::GitCommand("分支名称不能为空".to_string()));
+    }
+    if git::run_git(repo, &["check-ref-format", "--branch", name]).is_err() {
+        return Err(AppError::GitCommand(format!("分支名称不合法：{}", name)));
+    }
+    Ok(())
+}
+
+// ── 合并冲突可视化解决 ─────────────────────────────────────────────────
+
+/// 读取冲突文件的原始内容（工作区中通常仍带有冲突标记）。
+#[tauri::command]
+pub async fn get_conflict_file(
+    file_path: String,
+    state: State<'_, AppState>,
+) -> AppResult<String> {
+    let root = repo_path_of(&state)?;
+    let full = safe_repo_file(&root, &file_path)?;
+    std::fs::read_to_string(&full).map_err(AppError::Io)
+}
+
+/// 写入解决后的内容，并 `git add` 标记冲突已解决。
+#[tauri::command]
+pub async fn resolve_conflict(
+    file_path: String,
+    content: String,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    let root = repo_path_of(&state)?;
+    let full = safe_repo_file(&root, &file_path)?;
+    std::fs::write(&full, content).map_err(AppError::Io)?;
+    git::run_git(Path::new(&root), &["add", "--", &file_path])?;
+    Ok(())
+}
+
+/// 不修改内容，直接把文件标记为已解决（用户已在外部编辑器处理）。
+#[tauri::command]
+pub async fn mark_conflict_resolved(
+    file_path: String,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    let root = repo_path_of(&state)?;
+    git::run_git(Path::new(&root), &["add", "--", &file_path])?;
+    Ok(())
+}
+
+// ── 更多分支操作 ──────────────────────────────────────────────────────
+
+/// 删除分支；force 为 true 时使用 `-D`（可删除未合并分支）。
+#[tauri::command]
+pub async fn delete_branch(
+    name: String,
+    force: bool,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    let name = name.trim().to_string();
+    let root = repo_path_of(&state)?;
+    let path = Path::new(&root);
+    validate_branch_name(path, &name)?;
+
+    let current =
+        git::run_git_string(path, &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_default();
+    if current.trim() == name {
+        return Err(AppError::GitCommand(
+            "不能删除当前所在的分支，请先切换到其他分支".to_string(),
+        ));
+    }
+
+    let flag = if force { "-D" } else { "-d" };
+    git::run_git(path, &["branch", flag, &name])?;
+    Ok(())
+}
+
+/// 重命名本地分支。
+#[tauri::command]
+pub async fn rename_branch(
+    old_name: String,
+    new_name: String,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    let old_name = old_name.trim().to_string();
+    let new_name = new_name.trim().to_string();
+    let root = repo_path_of(&state)?;
+    let path = Path::new(&root);
+
+    if old_name.is_empty() {
+        return Err(AppError::GitCommand("原分支名称不能为空".to_string()));
+    }
+    validate_branch_name(path, &new_name)?;
+    if old_name == new_name {
+        return Ok(());
+    }
+
+    let old_ref = format!("refs/heads/{}", old_name);
+    if git::run_git(path, &["show-ref", "--verify", "--quiet", &old_ref]).is_err() {
+        return Err(AppError::GitCommand(format!("分支 {} 不存在", old_name)));
+    }
+    let new_ref = format!("refs/heads/{}", new_name);
+    if git::run_git(path, &["show-ref", "--verify", "--quiet", &new_ref]).is_ok() {
+        return Err(AppError::GitCommand(format!("分支 {} 已存在", new_name)));
+    }
+
+    git::run_git(path, &["branch", "-m", &old_name, &new_name])?;
+    Ok(())
+}
+
+/// 把指定分支合并到当前分支。
+#[tauri::command]
+pub async fn merge_branch(name: String, state: State<'_, AppState>) -> AppResult<()> {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err(AppError::GitCommand("分支名称不能为空".to_string()));
+    }
+    let root = repo_path_of(&state)?;
+    let path = Path::new(&root);
+
+    if has_unmerged_changes(path)? {
+        return Err(AppError::GitCommand(
+            "存在未解决的合并冲突，请先解决冲突".to_string(),
+        ));
+    }
+
+    git::run_git(path, &["merge", "--no-edit", &name])?;
+    Ok(())
+}
+
+/// 把当前分支 rebase 到指定分支上。
+#[tauri::command]
+pub async fn rebase_branch(onto: String, state: State<'_, AppState>) -> AppResult<()> {
+    let onto = onto.trim().to_string();
+    if onto.is_empty() {
+        return Err(AppError::GitCommand("目标分支名称不能为空".to_string()));
+    }
+    let root = repo_path_of(&state)?;
+    let path = Path::new(&root);
+
+    if has_unmerged_changes(path)? {
+        return Err(AppError::GitCommand(
+            "存在未解决的合并冲突，请先解决冲突".to_string(),
+        ));
+    }
+
+    git::run_git(path, &["rebase", &onto])?;
+    Ok(())
+}
+
+/// 把指定提交 cherry-pick 到当前分支。
+#[tauri::command]
+pub async fn cherry_pick_commit(hash: String, state: State<'_, AppState>) -> AppResult<()> {
+    let hash = hash.trim().to_string();
+    if hash.is_empty() || hash.len() > 40 || !hash.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(AppError::ParseError(format!("非法的提交哈希：{}", hash)));
+    }
+    let root = repo_path_of(&state)?;
+    let path = Path::new(&root);
+
+    if has_unmerged_changes(path)? {
+        return Err(AppError::GitCommand(
+            "存在未解决的合并冲突，请先解决冲突".to_string(),
+        ));
+    }
+
+    git::run_git(path, &["cherry-pick", &hash])?;
+    Ok(())
+}
+
+// ── 提交增强 ──────────────────────────────────────────────────────────
+
+/// 修正上一次提交：message 为空时保留原提交信息（--no-edit）。
+#[tauri::command]
+pub async fn amend_commit(
+    message: Option<String>,
+    state: State<'_, AppState>,
+) -> AppResult<()> {
+    let root = repo_path_of(&state)?;
+    let path = Path::new(&root);
+
+    if has_unmerged_changes(path)? {
+        return Err(AppError::GitCommand(
+            "存在未解决的合并冲突，请先解决冲突".to_string(),
+        ));
+    }
+    if git::run_git(path, &["rev-parse", "--verify", "HEAD"]).is_err() {
+        return Err(AppError::GitCommand("当前仓库还没有提交".to_string()));
+    }
+
+    let msg = message
+        .map(|m| m.trim().to_string())
+        .filter(|m| !m.is_empty());
+    match msg {
+        Some(m) => git::run_git(path, &["commit", "--amend", "-m", &m])?,
+        None => git::run_git(path, &["commit", "--amend", "--no-edit"])?,
+    }
+    Ok(())
+}
+
+/// 撤销上一次提交（soft reset），提交内容保留在暂存区。
+#[tauri::command]
+pub async fn undo_last_commit(state: State<'_, AppState>) -> AppResult<()> {
+    let root = repo_path_of(&state)?;
+    let path = Path::new(&root);
+
+    if has_unmerged_changes(path)? {
+        return Err(AppError::GitCommand(
+            "存在未解决的合并冲突，请先解决冲突".to_string(),
+        ));
+    }
+    if git::run_git(path, &["rev-parse", "--verify", "HEAD^"]).is_err() {
+        return Err(AppError::GitCommand(
+            "没有可撤销的提交（当前提交可能是根提交）".to_string(),
+        ));
+    }
+
+    git::run_git(path, &["reset", "--soft", "HEAD~1"])?;
+    Ok(())
+}
+
+/// 两个提交之间的文件列表。
+#[tauri::command]
+pub async fn get_compare_files(
+    from_hash: String,
+    to_hash: String,
+    state: State<'_, AppState>,
+) -> AppResult<Vec<CommitFile>> {
+    let root = repo_path_of(&state)?;
+    history::get_compare_files(Path::new(&root), &from_hash, &to_hash)
+}
+
+/// 两个提交之间单个文件的 diff。
+#[tauri::command]
+pub async fn get_compare_file_diff(
+    from_hash: String,
+    to_hash: String,
+    file_path: String,
+    old_path: Option<String>,
+    state: State<'_, AppState>,
+) -> AppResult<FileDiff> {
+    let root = repo_path_of(&state)?;
+    history::get_compare_file_diff(
+        Path::new(&root),
+        &from_hash,
+        &to_hash,
+        &file_path,
+        old_path.as_deref(),
+    )
 }

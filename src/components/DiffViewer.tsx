@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   FileCode2,
   ArrowRight,
@@ -14,6 +14,7 @@ import {
 import type { FileDiff, ChangedFile, DiffView, DiffHunk, DiffLine } from "../types";
 import { openPath } from "../api/tauri";
 import type { OpenMethod } from "../api/tauri";
+import { highlightLine, languageForPath } from "../lib/highlight";
 
 /** 预览页「打开方式」下拉选项 */
 const OPEN_METHODS: { id: OpenMethod; label: string }[] = [
@@ -269,13 +270,47 @@ export default function DiffViewer({ diff, file, view, onViewChange, contextLabe
         </div>
       </div>
 
-      <DiffBody diff={diff} layout={layout} />
+      <DiffBody diff={diff} layout={layout} filePath={displayPath} />
     </>
   );
 }
 
+/** 单行 Diff 内容：有可用语言时渲染 highlight.js 的高亮 HTML，否则纯文本 */
+function DiffLineContent({
+  content,
+  language,
+}: {
+  content: string;
+  language: string | null;
+}) {
+  const html = highlightLine(content, language);
+  if (html === null) {
+    return <span className="diff-line-content">{content || " "}</span>;
+  }
+  return (
+    <span
+      className="diff-line-content diff-line-highlighted"
+      dangerouslySetInnerHTML={{ __html: html || " " }}
+    />
+  );
+}
+
 /** 文件 diff 内容区（供单文件视图与全部变更视图复用） */
-export function DiffBody({ diff, layout }: { diff: FileDiff; layout: DiffLayout }) {
+export function DiffBody({
+  diff,
+  layout,
+  filePath,
+}: {
+  diff: FileDiff;
+  layout: DiffLayout;
+  /** 用于推断语法高亮语言的文件路径 */
+  filePath?: string;
+}) {
+  const language = useMemo(
+    () => (filePath ? languageForPath(filePath) : null),
+    [filePath],
+  );
+
   return (
     <div className="diff-content">
       {diff.is_binary && (
@@ -325,7 +360,7 @@ export function DiffBody({ diff, layout }: { diff: FileDiff; layout: DiffLayout 
                   <span className="diff-line-num">
                     {line.type === "remove" ? "" : line.new_line_number > 0 ? line.new_line_number : ""}
                   </span>
-                  <span className="diff-line-content">{line.content || " "}</span>
+                  <DiffLineContent content={line.content} language={language} />
                 </div>
               ))}
             </div>
@@ -353,7 +388,10 @@ export function DiffBody({ diff, layout }: { diff: FileDiff; layout: DiffLayout 
                       <span className="diff-line-num">
                         {row.left && row.left.old_line_number > 0 ? row.left.old_line_number : ""}
                       </span>
-                      <span className="diff-line-content">{row.left ? row.left.content || " " : ""}</span>
+                      <DiffLineContent
+                        content={row.left ? row.left.content : ""}
+                        language={language}
+                      />
                     </div>
                     <div
                       className={`diff-split-cell diff-split-right ${row.right ? row.right.type : "empty"}`}
@@ -361,7 +399,10 @@ export function DiffBody({ diff, layout }: { diff: FileDiff; layout: DiffLayout 
                       <span className="diff-line-num">
                         {row.right && row.right.new_line_number > 0 ? row.right.new_line_number : ""}
                       </span>
-                      <span className="diff-line-content">{row.right ? row.right.content || " " : ""}</span>
+                      <DiffLineContent
+                        content={row.right ? row.right.content : ""}
+                        language={language}
+                      />
                     </div>
                   </Fragment>
                 ))}
