@@ -20,15 +20,9 @@ import { WindowControls, WindowResizeHandles } from "../components/WindowControl
 import type { RepositoryInfo, GitStatus, ChangedFile, DiffView, FileDiff, CommitInfo, RecentRepo, SyncStatus, StashEntry, BranchList, OperationState } from "../types";
 import { getStatus, getFileDiff, saveCurrentRepo, getCommitLog, openTerminal, revertFile, stageFile, stageAll, discardAllUnstaged, commitChanges, getSyncStatus, syncChanges, pullChanges, fetchChanges, pushChanges, createBranch, createTag, stashChanges, getStashList, popStash, applyStash, dropStash, clearStashes, getBranches, checkoutBranch, openPath, getRecentRepos, openRepository, removeRecentRepo, deleteBranch, renameBranch, mergeBranch, rebaseBranch, cherryPickCommit, amendCommit, undoLastCommit, getOperationState, continueRebase, abortRebase, continueCherryPick, abortCherryPick } from "../api/tauri";
 import type { OpenMethod } from "../api/tauri";
+import { useI18n } from "../i18n";
 
 const PAGE_SIZE = 50;
-
-/** 打开方式选项与显示名 */
-const OPEN_METHODS: { id: OpenMethod; label: string }[] = [
-  { id: "editor", label: "VS Code" },
-  { id: "explorer", label: "文件资源管理器" },
-  { id: "system", label: "默认应用" },
-];
 
 /** 状态中是否存在未解决的合并冲突 */
 function statusHasConflicts(status: GitStatus | null | undefined): boolean {
@@ -81,9 +75,19 @@ interface Props {
 type Tab = "changes" | "history";
 
 export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenSettings }: Props) {
+  const { t } = useI18n();
   // 变更 tab 暂时隐藏，只保留提交记录
   const [activeTab] = useState<Tab>("history");
   const [filter, setFilter] = useState("");
+
+  const openMethods: { id: OpenMethod; label: string }[] = useMemo(
+    () => [
+      { id: "editor", label: t("openMethods.editor") },
+      { id: "explorer", label: t("openMethods.explorer") },
+      { id: "system", label: t("openMethods.system") },
+    ],
+    [t],
+  );
 
   const [recentRepos, setRecentRepos] = useState<RecentRepo[]>(getRecentRepos());
 
@@ -867,7 +871,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
     const value = branchActionInput.trim();
 
     if (type === "rename" && !value) {
-      setBranchActionError("请输入新的分支名称");
+      setBranchActionError(t("dialogs.inputNewBranchNameError"));
       return;
     }
 
@@ -927,6 +931,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
     refreshBranches,
     loadStatus,
     refreshHistory,
+    t,
   ]);
 
   /** 冲突文件保存 / 标记已解决后刷新状态，并自动跳到下一个冲突 */
@@ -1070,7 +1075,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
     if (!toolAction || toolBusy) return;
     const value = toolInput.trim();
     if ((toolAction === "branch" || toolAction === "tag") && !value) {
-      setToolError(toolAction === "branch" ? "请输入分支名称" : "请输入标签名称");
+      setToolError(toolAction === "branch" ? t("dialogs.inputBranchNameError") : t("dialogs.inputTagNameError"));
       return;
     }
 
@@ -1102,7 +1107,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
     } finally {
       setToolBusy(false);
     }
-  }, [toolAction, toolBusy, toolInput, repo.path, onRepoUpdate, loadStatus, refreshHistory]);
+  }, [toolAction, toolBusy, toolInput, repo.path, onRepoUpdate, loadStatus, refreshHistory, t]);
 
   /** 提交暂存区内容；Amend 模式下修正上一次提交 */
   const handleCommit = useCallback(async () => {
@@ -1329,7 +1334,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
             persistWidth(PROJECT_SIDEBAR_WIDTH_KEY, PROJECT_SIDEBAR_DEFAULT_WIDTH);
           }}
           showLine={false}
-          title="拖拽调整项目侧边栏宽度，双击恢复默认"
+          title={t("projectSidebar.resizeTooltip")}
         />
       )}
 
@@ -1342,7 +1347,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
             className={`toolbar-branch-badge ${repo.is_detached ? "detached" : ""}`}
             onClick={toggleBranchMenu}
             disabled={branchBusy}
-            title={repo.is_detached ? "Detached HEAD，点击切换分支" : `分支: ${repo.branch}，点击切换`}
+            title={repo.is_detached ? t("toolbar.branchDetached") : t("toolbar.branchTooltip", { branch: repo.branch })}
           >
             {branchBusy ? (
               <Loader2 size={13} className="spin" style={{ flexShrink: 0 }} />
@@ -1355,13 +1360,13 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
 
           {branchMenuOpen && (
             <div className="branch-menu">
-              <div className="branch-menu-section">本地分支</div>
+              <div className="branch-menu-section">{t("toolbar.localBranches")}</div>
               {branches === null ? (
                 <div className="branch-menu-loading">
-                  <Loader2 size={12} className="spin" /> 正在读取分支...
+                  <Loader2 size={12} className="spin" /> {t("toolbar.readingBranches")}
                 </div>
               ) : branches.local.length === 0 ? (
-                <div className="branch-menu-empty">没有本地分支</div>
+                <div className="branch-menu-empty">{t("toolbar.noLocalBranches")}</div>
               ) : (
                 branches.local.map((name) => {
                   const isCurrent = name === branches.current || (!branches.current && name === repo.branch);
@@ -1381,14 +1386,14 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                           <GitBranch size={12} style={{ flexShrink: 0, opacity: 0.6 }} />
                         )}
                         <span className="branch-menu-name">{name}</span>
-                        {isCurrent && <span className="branch-menu-tag">当前</span>}
+                        {isCurrent && <span className="branch-menu-tag">{t("toolbar.currentTag")}</span>}
                       </button>
                       <div className="branch-menu-actions">
                         <button
                           type="button"
                           className="branch-menu-action"
                           disabled={branchBusy || isCurrent}
-                          title={isCurrent ? "不能合并当前分支" : `把 ${name} 合并到当前分支`}
+                          title={isCurrent ? t("toolbar.cannotMergeCurrent") : t("toolbar.mergeBranchTitle", { name })}
                           onClick={() => openBranchAction("merge", name)}
                         >
                           <GitMerge size={12} />
@@ -1397,7 +1402,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                           type="button"
                           className="branch-menu-action"
                           disabled={branchBusy || isCurrent}
-                          title={isCurrent ? "不能变基到当前分支" : `把当前分支变基到 ${name}`}
+                          title={isCurrent ? t("toolbar.cannotRebaseCurrent") : t("toolbar.rebaseBranchTitle", { name })}
                           onClick={() => openBranchAction("rebase", name)}
                         >
                           <RotateCw size={12} />
@@ -1406,7 +1411,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                           type="button"
                           className="branch-menu-action"
                           disabled={branchBusy}
-                          title={`重命名分支 ${name}`}
+                          title={t("toolbar.renameBranchTitle", { name })}
                           onClick={() => openBranchAction("rename", name)}
                         >
                           <Pencil size={12} />
@@ -1415,7 +1420,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                           type="button"
                           className="branch-menu-action danger"
                           disabled={branchBusy || isCurrent}
-                          title={isCurrent ? "不能删除当前分支" : `删除分支 ${name}`}
+                          title={isCurrent ? t("toolbar.cannotDeleteCurrent") : t("toolbar.deleteBranchTitle", { name })}
                           onClick={() => openBranchAction("delete", name)}
                         >
                           <Trash2 size={12} />
@@ -1426,9 +1431,9 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                 })
               )}
 
-              <div className="branch-menu-section">远程分支</div>
+              <div className="branch-menu-section">{t("toolbar.remoteBranches")}</div>
               {branches === null ? null : branches.remote.length === 0 ? (
-                <div className="branch-menu-empty">没有远程分支</div>
+                <div className="branch-menu-empty">{t("toolbar.noRemoteBranches")}</div>
               ) : (
                 branches.remote.map((name) => {
                   const shortName = name.split("/").slice(1).join("/");
@@ -1442,7 +1447,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                     >
                       <GitBranch size={12} style={{ flexShrink: 0, opacity: 0.6 }} />
                       <span className="branch-menu-name">{name}</span>
-                      {hasLocal && <span className="branch-menu-tag subtle">本地已有</span>}
+                      {hasLocal && <span className="branch-menu-tag subtle">{t("toolbar.hasLocalTag")}</span>}
                     </button>
                   );
                 })
@@ -1458,8 +1463,8 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
             disabled={remoteBusy !== null}
             title={
               syncStatus && syncStatus.behind > 0
-                ? `拉取远程变更 (Pull) · 落后 ${syncStatus.behind} 个提交`
-                : "拉取远程变更 (Pull)"
+                ? t("toolbar.pullBehindTooltip", { count: syncStatus.behind })
+                : t("toolbar.pullTooltip")
             }
           >
             {remoteBusy === "pull" ? (
@@ -1467,9 +1472,9 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
             ) : (
               <Download size={14} />
             )}
-            <span>拉取</span>
+            <span>{t("toolbar.pull")}</span>
             {syncStatus && syncStatus.behind > 0 && (
-              <span className="toolbar-badge" title={`待拉取 ${syncStatus.behind} 个提交`}>
+              <span className="toolbar-badge" title={t("toolbar.pendingPullBadge", { count: syncStatus.behind })}>
                 {syncStatus.behind}
               </span>
             )}
@@ -1483,12 +1488,12 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
             }
             title={
               syncStatus && !syncStatus.has_upstream
-                ? "当前分支未关联远程分支，无法推送"
+                ? t("toolbar.pushNoUpstream")
                 : syncStatus && syncStatus.ahead === 0
-                  ? "没有待推送的本地提交"
+                  ? t("toolbar.pushNoAhead")
                   : syncStatus && syncStatus.ahead > 0
-                    ? `推送本地提交 (Push) · 领先 ${syncStatus.ahead} 个提交`
-                    : "推送本地提交 (Push)"
+                    ? t("toolbar.pushAheadTooltip", { count: syncStatus.ahead })
+                    : t("toolbar.pushTooltip")
             }
           >
             {remoteBusy === "push" ? (
@@ -1496,9 +1501,9 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
             ) : (
               <Upload size={14} />
             )}
-            <span>推送</span>
+            <span>{t("toolbar.push")}</span>
             {syncStatus && syncStatus.ahead > 0 && (
-              <span className="toolbar-badge" title={`待推送 ${syncStatus.ahead} 个提交`}>
+              <span className="toolbar-badge" title={t("toolbar.pendingPushBadge", { count: syncStatus.ahead })}>
                 {syncStatus.ahead}
               </span>
             )}
@@ -1507,26 +1512,26 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
             className="toolbar-btn"
             onClick={handleFetch}
             disabled={remoteBusy !== null}
-            title="获取远程更新 (Fetch)"
+            title={t("toolbar.fetchTooltip")}
           >
             {remoteBusy === "fetch" ? (
               <Loader2 size={14} className="spin" />
             ) : (
               <RotateCw size={14} />
             )}
-            <span>获取</span>
+            <span>{t("toolbar.fetch")}</span>
           </button>
 
           <div className="toolbar-menu-wrap">
             <button
               className="toolbar-btn"
               onClick={() => setToolMenuOpen((v) => !v)}
-              title="更多 Git 操作"
+              title={t("toolbar.moreTooltip")}
               aria-haspopup="menu"
               aria-expanded={toolMenuOpen}
             >
               <MoreHorizontal size={14} />
-              <span>更多</span>
+              <span>{t("toolbar.more")}</span>
             </button>
             {toolMenuOpen && (
               <div className="toolbar-menu" role="menu">
@@ -1537,7 +1542,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                   onClick={() => openToolDialog("branch")}
                 >
                   <GitBranch size={13} />
-                  <span>新建分支</span>
+                  <span>{t("toolbar.newBranch")}</span>
                 </button>
                 <button
                   type="button"
@@ -1546,28 +1551,28 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                   onClick={() => openToolDialog("tag")}
                 >
                   <Tag size={13} />
-                  <span>新建标签</span>
+                  <span>{t("toolbar.newTag")}</span>
                 </button>
                 <button
                   type="button"
                   className="toolbar-menu-item"
                   role="menuitem"
                   disabled={changesCount === 0}
-                  title={changesCount === 0 ? "当前没有可贮藏的变更" : "贮藏当前所有变更"}
+                  title={changesCount === 0 ? t("toolbar.noStashableChanges") : t("toolbar.stashChanges")}
                   onClick={() => openToolDialog("stash")}
                 >
                   <Archive size={13} />
-                  <span>贮藏变更</span>
+                  <span>{t("toolbar.stashChanges")}</span>
                 </button>
                 <button
                   type="button"
                   className="toolbar-menu-item"
                   role="menuitem"
-                  title="查看并恢复已贮藏的变更"
+                  title={t("toolbar.stashList")}
                   onClick={() => openToolDialog("stashes")}
                 >
                   <ArchiveRestore size={13} />
-                  <span>贮藏列表 / 恢复</span>
+                  <span>{t("toolbar.stashList")}</span>
                 </button>
                 <div className="toolbar-menu-divider" />
                 <button
@@ -1577,8 +1582,8 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                   disabled={gitBusy || commits.length === 0}
                   title={
                     commits.length === 0
-                      ? "当前仓库还没有提交"
-                      : "撤销最近一次提交，内容保留在暂存区 (git reset --soft HEAD~1)"
+                      ? t("toolbar.noCommitsInRepo")
+                      : t("toolbar.undoLastCommitTooltip")
                   }
                   onClick={() => {
                     setToolMenuOpen(false);
@@ -1586,7 +1591,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                   }}
                 >
                   <RotateCcw size={13} />
-                  <span>撤销上次提交</span>
+                  <span>{t("toolbar.undoLastCommit")}</span>
                 </button>
               </div>
             )}
@@ -1600,7 +1605,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
             <button
               className="toolbar-btn open-with-main"
               onClick={handleOpenProject}
-              title="用 VS Code 打开当前项目"
+              title={t("toolbar.openWithVsCode")}
             >
               <ExternalLink size={14} />
               <span>VS Code</span>
@@ -1608,15 +1613,15 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
             <button
               className={`toolbar-btn open-with-caret ${openMenuOpen ? "open" : ""}`}
               onClick={() => setOpenMenuOpen((v) => !v)}
-              title="选择打开方式"
+              title={t("toolbar.chooseOpenMethod")}
             >
               <ChevronDown size={12} />
             </button>
 
             {openMenuOpen && (
               <div className="open-with-menu">
-                <div className="open-with-menu-title">打开方式</div>
-                {OPEN_METHODS.map((item) => (
+                <div className="open-with-menu-title">{t("toolbar.openMethodTitle")}</div>
+                {openMethods.map((item) => (
                   <button
                     key={item.id}
                     type="button"
@@ -1632,19 +1637,19 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
           <button
             className="toolbar-btn"
             onClick={handleOpenTerminal}
-            title="在当前仓库根目录打开 PowerShell"
+            title={t("toolbar.openTerminalTooltip")}
           >
             <Terminal size={14} />
-            <span>终端</span>
+            <span>{t("toolbar.openTerminal")}</span>
           </button>
           {onOpenSettings && (
             <button
               className="toolbar-btn"
               onClick={onOpenSettings}
-              title="应用设置 (修改主题等)"
+              title={t("toolbar.settingsTooltip")}
             >
               <Settings size={14} />
-              <span>设置</span>
+              <span>{t("toolbar.settings")}</span>
             </button>
           )}
         </div>
@@ -1654,10 +1659,10 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
         <div className={`git-operation-bar ${operationState.kind}`}>
           <GitMerge size={14} className="git-operation-icon" />
           <span className="git-operation-text">
-            {operationState.kind === "rebase" ? "正在 Rebase" : "正在 Cherry-pick"}
+            {operationState.kind === "rebase" ? t("operationBar.rebaseInProgress") : t("operationBar.cherryPickInProgress")}
             {conflictCount > 0
-              ? `：还有 ${conflictCount} 个冲突待解决，解决并暂存后可继续`
-              : "：冲突已解决，可以继续"}
+              ? t("operationBar.hasConflictsDesc", { count: conflictCount })
+              : t("operationBar.resolvedDesc")}
           </span>
           <button
             type="button"
@@ -1666,8 +1671,8 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
             disabled={operationBusy || conflictCount > 0}
             title={
               conflictCount > 0
-                ? "仍有未解决的冲突，请先解决并暂存所有冲突文件"
-                : "继续当前操作"
+                ? t("operationBar.hasConflictsTooltip")
+                : t("operationBar.continueTooltip")
             }
           >
             {operationBusy ? (
@@ -1675,17 +1680,17 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
             ) : (
               <Check size={12} />
             )}
-            <span>继续</span>
+            <span>{t("common.continue")}</span>
           </button>
           <button
             type="button"
             className="git-operation-btn danger"
             onClick={() => setConfirmAbortOperation(true)}
             disabled={operationBusy}
-            title="中止当前操作并恢复到操作前的状态"
+            title={t("operationBar.abortTooltip")}
           >
             <X size={12} />
-            <span>中止</span>
+            <span>{t("common.abort")}</span>
           </button>
         </div>
       )}
@@ -1697,19 +1702,19 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
           <button
             type="button"
             className="error-copy-btn"
-            title="复制完整错误信息"
+            title={t("operationBar.copyErrorTooltip")}
             onClick={() => {
               navigator.clipboard.writeText(error).catch(() => {});
             }}
           >
             <Copy size={12} />
-            <span>复制</span>
+            <span>{t("common.copy")}</span>
           </button>
           <button
             type="button"
             className="global-error-close"
             onClick={() => setError(null)}
-            title="关闭"
+            title={t("common.close")}
           >
             <X size={12} />
           </button>
@@ -1730,19 +1735,19 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                 className="sidebar-tab active"
               >
                 <GitCommit size={14} />
-                <span>提交记录</span>
+                <span>{t("commitList.tabCommits")}</span>
               </button>
             </div>
             <div className="sidebar-tabs-meta">
-              <span className="sidebar-commits-count" title="已加载提交数量">
+              <span className="sidebar-commits-count" title={t("commitList.loadedCommitsTooltip")}>
                 {filter.trim()
-                  ? `匹配 ${filteredCommits.length} / ${commits.length}`
-                  : `共 ${commits.length} 次提交`}
+                  ? t("commitList.commitsMatchCount", { filtered: filteredCommits.length, total: commits.length })
+                  : t("commitList.commitsCount", { count: commits.length })}
               </span>
               <button
                 type="button"
                 className="sidebar-refresh-btn"
-                title="刷新提交记录与状态"
+                title={t("commitList.refreshTooltip")}
                 onClick={() => {
                   refreshHistory();
                   loadStatus();
@@ -1759,7 +1764,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
             <input
               type="text"
               className="sidebar-search-input"
-              placeholder="搜索提交记录、作者、哈希..."
+              placeholder={t("commitList.searchPlaceholder")}
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
             />
@@ -1768,7 +1773,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                 type="button"
                 className="sidebar-search-clear"
                 onClick={() => setFilter("")}
-                title="清空搜索"
+                title={t("commitList.clearSearchTooltip")}
               >
                 <X size={12} />
               </button>
@@ -1823,7 +1828,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
             setCommitSidebarWidth(COMMIT_SIDEBAR_DEFAULT_WIDTH);
             persistWidth(COMMIT_SIDEBAR_WIDTH_KEY, COMMIT_SIDEBAR_DEFAULT_WIDTH);
           }}
-          title="拖拽调整提交列表宽度，双击恢复默认"
+          title={t("projectSidebar.resizeCommitTooltip")}
         />
 
         {activeTab === "history" && !selectedFolderFile && (
@@ -1835,8 +1840,8 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                     <div className="uncommitted-header-left">
                       <span className="uncommitted-header-title">
                         <FileCode2 size={14} />
-                        <span>未提交的变更</span>
-                        <span className="uncommitted-header-count" title="总变更文件数">
+                        <span>{t("uncommittedPanel.title")}</span>
+                        <span className="uncommitted-header-count" title={t("uncommittedPanel.totalChangesTooltip")}>
                           {changesCount}
                         </span>
                       </span>
@@ -1844,22 +1849,22 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                         <div className="uncommitted-header-tags">
                           <span
                             className={`uncommitted-tag staged ${status.staged.length > 0 ? "has-items" : ""}`}
-                            title={`${status.staged.length} 个文件已暂存，将包含在此次提交中`}
+                            title={t("uncommittedPanel.stagedBadgeTooltip", { count: status.staged.length })}
                           >
-                            已暂存 {status.staged.length}
+                            {t("uncommittedPanel.stagedBadge", { count: status.staged.length })}
                           </span>
                           <span
                             className={`uncommitted-tag unstaged ${status.unstaged.length > 0 ? "has-items" : ""}`}
-                            title={`${status.unstaged.length} 个文件在工作区未暂存`}
+                            title={t("uncommittedPanel.unstagedBadgeTooltip", { count: status.unstaged.length })}
                           >
-                            未暂存 {status.unstaged.length}
+                            {t("uncommittedPanel.unstagedBadge", { count: status.unstaged.length })}
                           </span>
                           {conflictCount > 0 && (
                             <span
                               className="uncommitted-tag conflict has-items"
-                              title="存在未解决的合并冲突，点击左侧带「!」标记的文件进行可视化解决"
+                              title={t("uncommittedPanel.conflictBadgeTooltip")}
                             >
-                              冲突 {conflictCount}
+                              {t("uncommittedPanel.conflictBadge", { count: conflictCount })}
                             </span>
                           )}
                         </div>
@@ -1872,10 +1877,10 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                         className="uncommitted-toolbar-btn"
                         onClick={handleStageAll}
                         disabled={changesCount === 0 || (status?.unstaged.length ?? 0) === 0}
-                        title="暂存所有工作区修改 (git add -A)"
+                        title={t("uncommittedPanel.stageAllTooltip")}
                       >
                         <Plus size={13} />
-                        <span>暂存全部</span>
+                        <span>{t("uncommittedPanel.stageAll")}</span>
                       </button>
 
                       <button
@@ -1883,10 +1888,10 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                         className="uncommitted-toolbar-btn danger"
                         onClick={() => setConfirmDiscardAll(true)}
                         disabled={changesCount === 0 || (status?.unstaged.length ?? 0) === 0}
-                        title="放弃所有工作区修改"
+                        title={t("uncommittedPanel.discardAllTooltip")}
                       >
                         <Undo2 size={13} />
-                        <span>放弃全部</span>
+                        <span>{t("uncommittedPanel.discardAll")}</span>
                       </button>
 
                       {showSync && (
@@ -1897,12 +1902,12 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                             className="uncommitted-sync-btn"
                             onClick={handleSync}
                             disabled={syncing}
-                            title="同步到远程仓库 (Sync Changes)"
+                            title={t("uncommittedPanel.syncTooltip")}
                           >
                             <FolderSync size={13} />
-                            <span>{syncing ? "同步中..." : "Sync Changes"}</span>
+                            <span>{syncing ? t("uncommittedPanel.syncing") : t("uncommittedPanel.syncChanges")}</span>
                             {syncStatus && syncStatus.ahead > 0 && (
-                              <span className="uncommitted-sync-count" title={`待同步 ${syncStatus.ahead} 个提交`}>
+                              <span className="uncommitted-sync-count" title={t("uncommittedPanel.syncAheadTooltip", { count: syncStatus.ahead })}>
                                 {syncStatus.ahead}
                               </span>
                             )}
@@ -1918,10 +1923,10 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                         className="uncommitted-commit-input"
                         placeholder={
                           amendMode
-                            ? "修正上一次提交：留空则沿用原提交信息..."
+                            ? t("uncommittedPanel.amendPlaceholder")
                             : (status?.staged.length ?? 0) === 0
-                              ? `输入提交信息... (提示: 暂存变更后按 ${isMac ? "⌘+Enter" : "Ctrl+Enter"} 提交)`
-                              : `输入提交信息 (按 ${isMac ? "⌘+Enter" : "Ctrl+Enter"} 提交)...`
+                              ? t("uncommittedPanel.commitPlaceholderEmpty", { key: isMac ? "⌘+Enter" : "Ctrl+Enter" })
+                              : t("uncommittedPanel.commitPlaceholder", { key: isMac ? "⌘+Enter" : "Ctrl+Enter" })
                         }
                         value={commitMessage}
                         onChange={(e) => setCommitMessage(e.target.value)}
@@ -1938,14 +1943,14 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                       disabled={committing || commits.length === 0}
                       title={
                         commits.length === 0
-                          ? "当前仓库还没有提交，无法 Amend"
+                          ? t("uncommittedPanel.amendDisabledNoCommit")
                           : amendMode
-                            ? "退出修正模式"
-                            : "修正上一次提交 (git commit --amend)"
+                            ? t("uncommittedPanel.amendExitTooltip")
+                            : t("uncommittedPanel.amendTooltip")
                       }
                     >
                       <Pencil size={13} />
-                      <span>Amend</span>
+                      <span>{t("uncommittedPanel.amendBtn")}</span>
                     </button>
 
                     <button
@@ -1961,13 +1966,13 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                       title={
                         amendMode
                           ? (status?.staged.length ?? 0) === 0
-                            ? "将只修改上一次提交的信息 (git commit --amend --no-edit/-m)"
-                            : `修正上一次提交（含 ${status?.staged.length} 个已暂存文件）(${isMac ? "⌘+Enter" : "Ctrl+Enter"})`
+                            ? t("uncommittedPanel.commitBtnAmendMsgOnlyTooltip")
+                            : t("uncommittedPanel.commitBtnAmendTooltip", { count: status?.staged.length, shortcut: isMac ? "⌘+Enter" : "Ctrl+Enter" })
                           : (status?.staged.length ?? 0) === 0
-                            ? "暂存区为空，请先点击上方「暂存全部」或在左侧暂存文件后再提交"
+                            ? t("uncommittedPanel.commitBtnEmptyStageTooltip")
                             : !commitMessage.trim()
-                              ? "请输入提交信息"
-                              : `提交 ${status?.staged.length} 个已暂存文件 (${isMac ? "⌘+Enter" : "Ctrl+Enter"})`
+                              ? t("uncommittedPanel.commitBtnInputPrompt")
+                              : t("uncommittedPanel.commitBtnNormalTooltip", { count: status?.staged.length, shortcut: isMac ? "⌘+Enter" : "Ctrl+Enter" })
                       }
                     >
                       <div className="uncommitted-commit-btn-content">
@@ -1980,20 +1985,22 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                         )}
                         <span>
                           {committing
-                            ? "提交中..."
+                            ? t("uncommittedPanel.committing")
                             : amendMode
-                              ? "Amend 修正提交"
-                              : "Commit 提交"}
+                              ? t("uncommittedPanel.commitAmendBtn")
+                              : t("uncommittedPanel.commitBtn")}
                         </span>
                       </div>
                       {(status?.staged.length ?? 0) > 0 ? (
                         <span className="uncommitted-commit-btn-badge">
-                          {status?.staged.length} 个文件 ·{" "}
-                          {amendMode ? "修正上次提交" : isMac ? "⌘↵" : "Ctrl+↵"}
+                          {t("uncommittedPanel.filesStagedBadge", {
+                            count: status?.staged.length,
+                            shortcut: amendMode ? (isMac ? "⌘↵" : "Ctrl+↵") : (isMac ? "⌘↵" : "Ctrl+↵"),
+                          })}
                         </span>
                       ) : (
                         <span className="uncommitted-commit-btn-badge muted">
-                          {amendMode ? "沿用上次提交信息" : "暂存区为空"}
+                          {amendMode ? t("uncommittedPanel.amendReuseBadge") : t("uncommittedPanel.stageEmptyBadge")}
                         </span>
                       )}
                     </button>
@@ -2006,13 +2013,13 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                     <button
                       type="button"
                       className="error-copy-btn"
-                      title="复制完整错误信息"
+                      title={t("operationBar.copyErrorTooltip")}
                       onClick={() => {
                         navigator.clipboard.writeText(error).catch(() => {});
                       }}
                     >
                       <Copy size={12} />
-                      <span>复制</span>
+                      <span>{t("common.copy")}</span>
                     </button>
                   </div>
                 )}
@@ -2021,7 +2028,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                   {status ? (
                     <div className="uncommitted-diff-area">
                         {rightPanelMode === "all" && (
-                          <AllChangesView status={status} title="变更文件" />
+                          <AllChangesView status={status} />
                         )}
 
                         {!selectedFile && rightPanelMode !== "all" && (
@@ -2029,8 +2036,8 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                             <div className="empty-state-icon-wrapper">
                               <FileCode2 size={32} strokeWidth={1.5} />
                             </div>
-                            <div className="empty-state-text">选择一个变更文件以查看 Diff</div>
-                            <div className="empty-state-sub">支持工作区与暂存区对比</div>
+                            <div className="empty-state-text">{t("uncommittedPanel.selectFileDiffPrompt")}</div>
+                            <div className="empty-state-sub">{t("uncommittedPanel.selectFileDiffSub")}</div>
                           </div>
                         )}
 
@@ -2058,7 +2065,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                           diffLoading && (
                           <div className="diff-loading">
                             <Loader2 size={13} className="spin" />
-                            <span>正在读取 Diff...</span>
+                            <span>{t("uncommittedPanel.diffLoading")}</span>
                           </div>
                         )}
 
@@ -2074,7 +2081,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                               >
                                 <AlertTriangle size={32} strokeWidth={1.5} />
                               </div>
-                              <div className="empty-state-text">Diff 加载失败</div>
+                              <div className="empty-state-text">{t("uncommittedPanel.diffLoadError")}</div>
                               <div
                                 style={{
                                   fontSize: 12,
@@ -2109,7 +2116,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                         <Loader2 size={28} className="spin" />
                       </div>
                       <div className="empty-state-text">
-                        {loading ? "正在获取仓库状态..." : "暂无变更"}
+                        {loading ? t("uncommittedPanel.gettingStatus") : t("uncommittedPanel.noChanges")}
                       </div>
                     </div>
                   )}
@@ -2132,17 +2139,17 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                   <GitCompare size={32} strokeWidth={1.5} />
                 </div>
                 <div className="empty-state-text">
-                  已选择对比基准 <code>{compareFrom.short_hash}</code>
+                  {t("uncommittedPanel.compareEmptyTitle", { hash: compareFrom.short_hash })}
                 </div>
                 <div className="empty-state-sub">
-                  点击另一条提交记录，查看两者之间的差异
+                  {t("uncommittedPanel.compareEmptySub")}
                 </div>
                 <button
                   type="button"
                   className="compare-empty-cancel"
                   onClick={() => setCompareFrom(null)}
                 >
-                  取消对比
+                  {t("uncommittedPanel.cancelCompare")}
                 </button>
               </div>
             ) : (
@@ -2150,8 +2157,8 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                 <div className="empty-state-icon-wrapper">
                   <GitCommit size={32} strokeWidth={1.5} />
                 </div>
-                <div className="empty-state-text">选择一条提交记录</div>
-                <div className="empty-state-sub">查看提交信息与所有文件的连续 Diff</div>
+                <div className="empty-state-text">{t("uncommittedPanel.selectCommitPrompt")}</div>
+                <div className="empty-state-sub">{t("uncommittedPanel.selectCommitSub")}</div>
               </div>
             )}
           </div>
@@ -2200,25 +2207,25 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
               )}
               <span className="confirm-title">
                 {toolAction === "branch"
-                  ? "新建分支"
+                  ? t("dialogs.newBranchDialogTitle")
                   : toolAction === "tag"
-                    ? "新建标签"
+                    ? t("dialogs.newTagDialogTitle")
                     : toolAction === "stash"
-                      ? "贮藏变更"
-                      : "贮藏列表"}
+                      ? t("dialogs.stashDialogTitle")
+                      : t("dialogs.stashesDialogTitle")}
               </span>
             </div>
             {toolAction === "stashes" ? (
               <div className="confirm-body">
                 <div className="dialog-hint">
-                  选择一条贮藏记录恢复（pop），恢复后该记录会从列表中移除。
+                  {t("dialogs.stashesHint")}
                 </div>
                 {toolBusy && stashes.length === 0 ? (
                   <div className="stash-empty">
-                    <Loader2 size={14} className="spin" /> 正在读取贮藏记录...
+                    <Loader2 size={14} className="spin" /> {t("dialogs.loadingStashes")}
                   </div>
                 ) : stashes.length === 0 ? (
-                  <div className="stash-empty">当前没有贮藏记录</div>
+                  <div className="stash-empty">{t("dialogs.noStashEntries")}</div>
                 ) : (
                   <div className="stash-list">
                     {stashes.map((entry) => (
@@ -2234,26 +2241,26 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                             type="button"
                             className="stash-action-btn"
                             disabled={toolBusy}
-                            title="应用贮藏，保留该记录 (git stash apply)"
+                            title={t("dialogs.applyStashKeepTooltip")}
                             onClick={() => handleApplyStash(entry.index, true)}
                           >
-                            应用
+                            {t("common.apply")}
                           </button>
                           <button
                             type="button"
                             className="stash-action-btn primary"
                             disabled={toolBusy}
-                            title="应用贮藏并删除该记录 (git stash pop)"
+                            title={t("dialogs.applyStashPopTooltip")}
                             onClick={() => handleApplyStash(entry.index, false)}
                           >
                             <ArchiveRestore size={11} />
-                            恢复
+                            {t("common.restore")}
                           </button>
                           <button
                             type="button"
                             className="stash-action-btn danger"
                             disabled={toolBusy}
-                            title="删除该贮藏记录，不应用到工作区 (git stash drop)"
+                            title={t("dialogs.dropStashTooltip")}
                             onClick={() => setStashConfirm({ type: "drop", index: entry.index })}
                           >
                             <Trash2 size={11} />
@@ -2269,10 +2276,10 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
               <div className="confirm-body">
                 <div className="dialog-hint">
                   {toolAction === "branch"
-                    ? "将基于当前提交创建新分支并立即切换过去。"
+                    ? t("dialogs.newBranchHint")
                     : toolAction === "tag"
-                      ? "将在当前提交上创建标签。名称重复或仓库尚无提交时会失败。"
-                      : "将贮藏当前所有变更（含未跟踪文件），并清空工作区。"}
+                      ? t("dialogs.newTagHint")
+                      : t("dialogs.stashHint")}
                 </div>
                 <input
                   autoFocus
@@ -2282,10 +2289,10 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                   spellCheck={false}
                   placeholder={
                     toolAction === "branch"
-                      ? "分支名称，例如 feature/login"
+                      ? t("dialogs.newBranchPlaceholder")
                       : toolAction === "tag"
-                        ? "标签名称，例如 v1.0.0"
-                        : "贮藏说明（可选）"
+                        ? t("dialogs.newTagPlaceholder")
+                        : t("dialogs.stashPlaceholder")
                   }
                   onChange={(e) => setToolInput(e.target.value)}
                   onKeyDown={(e) => {
@@ -2303,11 +2310,11 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                   onClick={() => setStashConfirm({ type: "clear" })}
                   disabled={toolBusy}
                 >
-                  清空全部
+                  {t("dialogs.clearAllBtn")}
                 </button>
               )}
               <button className="confirm-btn confirm-btn-cancel" onClick={closeToolDialog} disabled={toolBusy}>
-                {toolAction === "stashes" ? "关闭" : "取消"}
+                {toolAction === "stashes" ? t("common.close") : t("common.cancel")}
               </button>
               {toolAction !== "stashes" && (
                 <button
@@ -2316,12 +2323,12 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                   disabled={toolBusy || (toolAction !== "stash" && !toolInput.trim())}
                 >
                   {toolBusy
-                    ? "处理中..."
+                    ? t("common.processing")
                     : toolAction === "branch"
-                      ? "创建并切换"
+                      ? t("dialogs.createAndSwitchBtn")
                       : toolAction === "tag"
-                        ? "创建标签"
-                        : "贮藏"}
+                        ? t("dialogs.createTagBtn")
+                        : t("dialogs.stashBtn")}
                 </button>
               )}
             </div>
@@ -2333,15 +2340,15 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
       {revertPending && (() => {
         const { file, scope } = revertPending;
         const scopeLabel =
-          scope === "unstaged" ? "工作区修改"
-          : scope === "staged" ? "暂存区修改"
-          : "所有修改（暂存区 + 工作区）";
+          scope === "unstaged" ? t("dialogs.scopeUnstaged")
+          : scope === "staged" ? t("dialogs.scopeStaged")
+          : t("dialogs.scopeAll");
         return (
           <ConfirmDialog
-            title="确认撤销"
-            message={`确定要撤销以下文件的${scopeLabel}吗？\n\n${file.path}\n\n此操作不可恢复。`}
-            confirmText="撤销"
-            cancelText="取消"
+            title={t("dialogs.confirmRevertTitle")}
+            message={t("dialogs.confirmRevertMsg", { scope: scopeLabel, path: file.path })}
+            confirmText={t("common.revert")}
+            cancelText={t("common.cancel")}
             onConfirm={handleRevertConfirm}
             onCancel={() => setRevertPending(null)}
           />
@@ -2349,26 +2356,24 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
       })()}
       {confirmDiscardAll && (
         <ConfirmDialog
-          title="确认放弃所有工作区修改"
-          message={
-            "将把所有已跟踪文件恢复为暂存区内容，并删除所有未跟踪文件（遵循 .gitignore）。\n\n此操作不可恢复。"
-          }
-          confirmText="全部放弃"
-          cancelText="取消"
+          title={t("dialogs.confirmDiscardAllTitle")}
+          message={t("dialogs.confirmDiscardAllMsg", { count: status?.unstaged.length ?? 0 })}
+          confirmText={t("dialogs.discardAllBtn")}
+          cancelText={t("common.cancel")}
           onConfirm={handleDiscardAllConfirm}
           onCancel={() => setConfirmDiscardAll(false)}
         />
       )}
       {stashConfirm && (
         <ConfirmDialog
-          title={stashConfirm.type === "clear" ? "确认清空全部贮藏" : "确认删除贮藏记录"}
+          title={stashConfirm.type === "clear" ? t("dialogs.clearStashTitle") : t("dialogs.dropStashTitle")}
           message={
             stashConfirm.type === "clear"
-              ? `将删除全部 ${stashes.length} 条贮藏记录，且不会应用到工作区。\n\n此操作不可恢复。`
-              : `将删除 ${stashes.find((s) => s.index === stashConfirm.index)?.ref_name ?? `stash@{${stashConfirm.index}}`}，且不会应用到工作区。\n\n此操作不可恢复。`
+              ? t("dialogs.clearStashMsg", { count: stashes.length })
+              : t("dialogs.dropStashMsg", { name: stashes.find((s) => s.index === stashConfirm.index)?.ref_name ?? `stash@{${stashConfirm.index}}` })
           }
-          confirmText={stashConfirm.type === "clear" ? "清空全部" : "删除"}
-          cancelText="取消"
+          confirmText={stashConfirm.type === "clear" ? t("dialogs.clearAllBtn") : t("common.delete")}
+          cancelText={t("common.cancel")}
           onConfirm={handleStashDelete}
           onCancel={() => setStashConfirm(null)}
         />
@@ -2385,11 +2390,11 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
           >
             <div className="confirm-header">
               <Pencil size={16} className="confirm-icon" style={{ color: "var(--accent-color)" }} />
-              <span className="confirm-title">重命名分支</span>
+              <span className="confirm-title">{t("dialogs.renameBranchTitle")}</span>
             </div>
             <div className="confirm-body">
               <div className="dialog-hint">
-                将把本地分支「{branchAction.name}」重命名为：
+                {t("dialogs.renameBranchHint", { name: branchAction.name })}
               </div>
               <input
                 autoFocus
@@ -2397,7 +2402,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                 type="text"
                 value={branchActionInput}
                 spellCheck={false}
-                placeholder="新的分支名称"
+                placeholder={t("dialogs.renameBranchPlaceholder")}
                 onChange={(e) => setBranchActionInput(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") handleBranchActionSubmit();
@@ -2412,14 +2417,14 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                 onClick={closeBranchAction}
                 disabled={branchActionBusy}
               >
-                取消
+                {t("common.cancel")}
               </button>
               <button
                 className="confirm-btn confirm-btn-primary"
                 onClick={handleBranchActionSubmit}
                 disabled={branchActionBusy || !branchActionInput.trim()}
               >
-                {branchActionBusy ? "处理中..." : "重命名"}
+                {branchActionBusy ? t("common.processing") : t("dialogs.renameBtn")}
               </button>
             </div>
           </div>
@@ -2431,26 +2436,26 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
         <ConfirmDialog
           title={
             branchAction.type === "merge"
-              ? "确认合并分支"
+              ? t("dialogs.mergeBranchTitle")
               : branchAction.type === "rebase"
-                ? "确认变基 (Rebase)"
-                : "确认删除分支"
+                ? t("dialogs.rebaseBranchTitle")
+                : t("dialogs.deleteBranchTitle")
           }
           message={
             branchAction.type === "merge"
-              ? `将把分支「${branchAction.name}」合并到当前分支「${repo.branch}」。\n\n如果产生冲突，需要在未提交的变更中解决后再提交。`
+              ? t("dialogs.mergeBranchMsg", { source: branchAction.name, target: repo.branch })
               : branchAction.type === "rebase"
-                ? `将把当前分支「${repo.branch}」变基到「${branchAction.name}」上。\n\n变基会重写当前分支的提交历史；如有冲突需要逐个解决。`
-                : `将删除本地分支「${branchAction.name}」。\n\n如果该分支尚未合并，Git 会拒绝删除。此操作不可恢复。`
+                ? t("dialogs.rebaseBranchMsg", { source: repo.branch, target: branchAction.name })
+                : t("dialogs.deleteBranchMsg", { name: branchAction.name })
           }
           confirmText={
             branchAction.type === "merge"
-              ? "合并"
+              ? t("common.merge")
               : branchAction.type === "rebase"
-                ? "变基"
-                : "删除分支"
+                ? t("common.rebase")
+                : t("common.delete")
           }
-          cancelText="取消"
+          cancelText={t("common.cancel")}
           onConfirm={handleBranchActionSubmit}
           onCancel={closeBranchAction}
         />
@@ -2459,12 +2464,10 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
       {/* ── 撤销上次提交确认 ─────────────────────────────────────── */}
       {confirmUndoCommit && (
         <ConfirmDialog
-          title="撤销上次提交"
-          message={
-            "将撤销最近一次提交（HEAD），提交内容会完整保留在暂存区，可修改后重新提交。\n\n此操作会改写当前分支的提交历史。"
-          }
-          confirmText="撤销提交"
-          cancelText="取消"
+          title={t("dialogs.undoCommitTitle")}
+          message={t("dialogs.undoCommitMsg")}
+          confirmText={t("dialogs.undoCommitBtn")}
+          cancelText={t("common.cancel")}
           onConfirm={handleUndoCommit}
           onCancel={() => setConfirmUndoCommit(false)}
         />
@@ -2473,10 +2476,14 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
       {/* ── Cherry-pick 确认 ────────────────────────────────────── */}
       {cherryPickTarget && (
         <ConfirmDialog
-          title="Cherry-pick 提交"
-          message={`将把提交 ${cherryPickTarget.short_hash}「${cherryPickTarget.subject || "(no message)"}」的改动应用到当前分支「${repo.branch}」。\n\n如果产生冲突，需要解决后再提交。`}
+          title={t("dialogs.cherryPickTitle")}
+          message={t("dialogs.cherryPickMsg", {
+            hash: cherryPickTarget.short_hash,
+            subject: cherryPickTarget.subject || t("allChanges.noMessage"),
+            branch: repo.branch,
+          })}
           confirmText="Cherry-pick"
-          cancelText="取消"
+          cancelText={t("common.cancel")}
           onConfirm={handleCherryPickConfirm}
           onCancel={() => setCherryPickTarget(null)}
         />
@@ -2487,14 +2494,14 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
         <ConfirmDialog
           title={
             operationState.kind === "rebase"
-              ? "确认中止 Rebase"
-              : "确认中止 Cherry-pick"
+              ? t("dialogs.abortRebaseTitle")
+              : t("dialogs.abortCherryPickTitle")
           }
-          message={`将中止当前${
-            operationState.kind === "rebase" ? " Rebase" : " Cherry-pick"
-          } 并恢复到操作前的状态，已解决的冲突内容不会保留。\n\n此操作不可恢复。`}
-          confirmText="中止操作"
-          cancelText="继续解决"
+          message={t("dialogs.abortOperationMsg", {
+            op: operationState.kind === "rebase" ? "Rebase" : "Cherry-pick",
+          })}
+          confirmText={t("dialogs.abortBtn")}
+          cancelText={t("dialogs.continueResolveBtn")}
           onConfirm={handleAbortOperation}
           onCancel={() => setConfirmAbortOperation(false)}
         />

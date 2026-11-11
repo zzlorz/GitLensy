@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { openPath } from "../api/tauri";
 import type { GitStatus, ChangedFile, FileStatus } from "../types";
+import { useI18n } from "../i18n";
 
 interface TreeNode {
   name: string;
@@ -350,6 +351,7 @@ export default function FolderTree({
   onSelectFile,
   selectedPath,
 }: Props) {
+  const { t } = useI18n();
   const [tree, setTree] = useState<TreeNode[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -371,7 +373,7 @@ export default function FolderTree({
     try {
       const normalizedPath = normalizePath(repoPath);
       if (!normalizedPath) {
-        setError("仓库路径为空");
+        setError(t("projectSidebar.repoPathEmpty"));
         setTree([]);
         return;
       }
@@ -470,7 +472,7 @@ export default function FolderTree({
     return (
       <div className="folder-tree-loading">
         <Loader2 size={13} className="spin" />
-        <span>正在扫描目录结构...</span>
+        <span>{t("projectSidebar.scanningTree")}</span>
       </div>
     );
   }
@@ -491,7 +493,7 @@ export default function FolderTree({
   if (hasFilter && !anyMatch) {
     return (
       <div className="folder-tree-empty">
-        <span>没有匹配的文件或目录</span>
+        <span>{t("projectSidebar.noMatchingFiles")}</span>
       </div>
     );
   }
@@ -515,7 +517,7 @@ export default function FolderTree({
         ))}
       {tree && tree.length === 0 && !hasFilter && (
         <div className="folder-tree-empty">
-          <span>目录为空</span>
+          <span>{t("projectSidebar.directoryEmpty")}</span>
         </div>
       )}
 
@@ -537,7 +539,7 @@ export default function FolderTree({
             }}
           >
             <ExternalLink size={13} />
-            <span>用外部编辑器打开</span>
+            <span>{t("projectSidebar.openInEditor")}</span>
           </button>
           <button
             type="button"
@@ -548,7 +550,7 @@ export default function FolderTree({
             }}
           >
             <FolderOpen size={13} />
-            <span>在文件资源管理器中定位</span>
+            <span>{t("projectSidebar.revealInExplorer")}</span>
           </button>
           <button
             type="button"
@@ -559,7 +561,7 @@ export default function FolderTree({
             }}
           >
             <Copy size={13} />
-            <span>复制相对路径</span>
+            <span>{t("projectSidebar.copyRelativePath")}</span>
           </button>
           <button
             type="button"
@@ -570,7 +572,7 @@ export default function FolderTree({
             }}
           >
             <Copy size={13} />
-            <span>复制绝对路径</span>
+            <span>{t("projectSidebar.copyAbsolutePath")}</span>
           </button>
         </div>
       )}

@@ -10,6 +10,7 @@ import {
   Loader2,
 } from "lucide-react";
 import type { CommitInfo, CommitFile, FileDiff } from "../types";
+import { useI18n } from "../i18n";
 
 /** Git-style letter badge identical to FileList */
 function StatusBadge({ status }: { status: string }) {
@@ -49,6 +50,7 @@ export default function CommitDetail({
   diffError: _diffError,
   onSelectFile,
 }: CommitDetailProps) {
+  const { t, formatDate, formatRelativeTime } = useI18n();
   const [bodyExpanded, setBodyExpanded] = useState(false);
   const [filter, setFilter] = useState("");
 
@@ -61,11 +63,13 @@ export default function CommitDetail({
     [onSelectFile]
   );
 
+  const relativeDate = formatRelativeTime(commit.date);
+
   return (
     <div className="commit-detail">
       {/* Commit metadata header */}
       <div className="commit-detail-header">
-        <div className="commit-detail-subject">{commit.subject || "(no message)"}</div>
+        <div className="commit-detail-subject">{commit.subject || t("allChanges.noMessage")}</div>
 
         {commit.body && (
           <button
@@ -73,7 +77,7 @@ export default function CommitDetail({
             onClick={() => setBodyExpanded((v) => !v)}
           >
             {bodyExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-            {bodyExpanded ? "收起详情" : "展开详情"}
+            {bodyExpanded ? t("allChanges.collapseDetails") : t("allChanges.expandDetails")}
           </button>
         )}
         {commit.body && bodyExpanded && (
@@ -81,11 +85,11 @@ export default function CommitDetail({
         )}
 
         <div className="commit-detail-meta">
-          <span className="commit-detail-meta-item" title="提交哈希">
+          <span className="commit-detail-meta-item" title={t("allChanges.commitHash")}>
             <GitCommit size={13} />
             <code>{commit.hash.slice(0, 16)}…</code>
           </span>
-          <span className="commit-detail-meta-item" title="作者">
+          <span className="commit-detail-meta-item" title={t("allChanges.author")}>
             <User size={13} />
             {commit.author_name}
             {commit.author_email && (
@@ -94,9 +98,9 @@ export default function CommitDetail({
               </span>
             )}
           </span>
-          <span className="commit-detail-meta-item" title={new Date(commit.date).toLocaleString()}>
+          <span className="commit-detail-meta-item" title={formatDate(commit.date)}>
             <Clock size={13} />
-            {commit.date_relative}
+            {relativeDate}
           </span>
           {commit.parent_count >= 2 && (
             <span className="commit-merge-badge">Merge</span>
@@ -107,7 +111,7 @@ export default function CommitDetail({
       {/* File list */}
       <div className="commit-detail-files-header">
         <Hash size={13} style={{ color: "var(--text-muted)" }} />
-        <span>变更文件</span>
+        <span>{t("allChanges.allChangesTitle")}</span>
         <span className="file-section-count" style={{ marginLeft: 6 }}>
           {files.length}
         </span>
@@ -115,7 +119,7 @@ export default function CommitDetail({
           <input
             type="text"
             className="sidebar-search-input"
-            placeholder="过滤..."
+            placeholder={t("common.filter")}
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             style={{ marginLeft: "auto", width: 140, padding: "3px 8px", fontSize: 11 }}
@@ -127,7 +131,7 @@ export default function CommitDetail({
         {filesLoading && (
           <div className="loading" style={{ padding: 20 }}>
             <Loader2 size={14} className="spin" />
-            <span>加载文件列表...</span>
+            <span>{t("allChanges.loadingChanges")}</span>
           </div>
         )}
 
@@ -139,7 +143,7 @@ export default function CommitDetail({
 
         {!filesLoading && !filesError && filteredFiles.length === 0 && (
           <div style={{ padding: "16px 12px", color: "var(--text-muted)", fontSize: 12, textAlign: "center" }}>
-            无变更文件
+            {t("fileList.noChangedFiles")}
           </div>
         )}
 

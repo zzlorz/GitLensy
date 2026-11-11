@@ -4,9 +4,18 @@ import WelcomePage from "./pages/WelcomePage";
 import MainWorkspace from "./pages/MainWorkspace";
 import SettingsModal from "./components/SettingsModal";
 import type { RepositoryInfo, ThemeMode } from "./types";
-import { getSavedRepo, saveCurrentRepo, openRepository, closeRepository, setWindowTheme, getPreferredEditor, setPreferredEditor } from "./api/tauri";
+import {
+  getSavedRepo,
+  saveCurrentRepo,
+  openRepository,
+  closeRepository,
+  setWindowTheme,
+  getPreferredEditor,
+  setPreferredEditor,
+} from "./api/tauri";
 import { ensureHighlightTheme } from "./lib/highlight";
 import { applyPreviewFontSize, loadPreviewFontSize } from "./lib/fontSize";
+import { I18nProvider, useI18n } from "./i18n";
 
 const THEME_KEY = "gitlensy:theme";
 
@@ -22,7 +31,8 @@ function getInitialTheme(): ThemeMode {
   return "dark";
 }
 
-export default function App() {
+function AppContent() {
+  const { t } = useI18n();
   const [repo, setRepo] = useState<RepositoryInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -136,7 +146,7 @@ export default function App() {
     return (
       <div className="loading" style={{ height: "100vh", backgroundColor: "var(--bg-primary)", gap: 12 }}>
         <Loader2 size={24} className="spin" style={{ color: "var(--accent-color)" }} />
-        <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>正在加载 GitLensy...</span>
+        <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>{t("common.appLoading")}</span>
       </div>
     );
   }
@@ -169,5 +179,13 @@ export default function App() {
         onPreviewFontSizeChange={handlePreviewFontSizeChange}
       />
     </>
+  );
+}
+
+export default function App() {
+  return (
+    <I18nProvider>
+      <AppContent />
+    </I18nProvider>
   );
 }

@@ -20,17 +20,11 @@ import type { FileDiff, ChangedFile, DiffView, DiffHunk, DiffLine } from "../typ
 import { openPath } from "../api/tauri";
 import type { OpenMethod } from "../api/tauri";
 import { highlightLine, languageForPath, getExtension } from "../lib/highlight";
+import { useI18n } from "../i18n";
 
 const IMAGE_EXTENSIONS = new Set([
   "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "ico", "tiff", "tif", "avif"
 ]);
-
-/** 预览页「打开方式」下拉选项 */
-const OPEN_METHODS: { id: OpenMethod; label: string }[] = [
-  { id: "editor", label: "VS Code" },
-  { id: "explorer", label: "文件资源管理器" },
-  { id: "system", label: "默认应用" },
-];
 
 interface Props {
   diff: FileDiff;
@@ -43,19 +37,6 @@ interface Props {
   repoPath?: string;
   /** 切换到完整文件内容预览（单文件视图提供） */
   onSwitchToFile?: () => void;
-}
-
-function statusLabel(status: string): string {
-  const labels: Record<string, string> = {
-    modified: "已修改 (Modified)",
-    added: "新添加 (Added)",
-    deleted: "已删除 (Deleted)",
-    renamed: "重命名 (Renamed)",
-    copied: "已复制 (Copied)",
-    conflict: "存在冲突 (Conflict)",
-    untracked: "未跟踪 (Untracked)",
-  };
-  return labels[status] || status;
 }
 
 export type DiffLayout = "unified" | "split";
@@ -119,6 +100,7 @@ export default function DiffViewer({
   repoPath,
   onSwitchToFile,
 }: Props) {
+  const { t } = useI18n();
   const [copied, setCopied] = useState(false);
   // 单文件视图默认统一单栏，不再沿用上次的双栏选择
   const [layout, setLayout] = useState<DiffLayout>("unified");
@@ -129,6 +111,15 @@ export default function DiffViewer({
     setLayout(next);
     saveDiffLayout(next);
   };
+
+  const openMethods: { id: OpenMethod; label: string }[] = useMemo(
+    () => [
+      { id: "editor", label: t("openMethods.editor") },
+      { id: "explorer", label: t("openMethods.explorer") },
+      { id: "system", label: t("openMethods.system") },
+    ],
+    [t]
+  );
 
   // 每次点击（切换）文件都回到统一单栏视图
   useEffect(() => {
@@ -170,6 +161,8 @@ export default function DiffViewer({
     setTimeout(() => setCopied(false), 1500);
   };
 
+  const statusLabel = t(`statusLabels.${displayStatus}`) || displayStatus;
+
   return (
     <>
       <div className="diff-header">
@@ -188,7 +181,7 @@ export default function DiffViewer({
             <button
               className="diff-copy-btn"
               onClick={handleCopyPath}
-              title={copied ? "已复制！" : "复制文件路径"}
+              title={copied ? t("common.copied") : t("diff.copyFilePath")}
             >
               {copied ? <Check size={13} style={{ color: "var(--added-color)" }} /> : <Copy size={13} />}
             </button>
@@ -200,17 +193,17 @@ export default function DiffViewer({
               <button
                 type="button"
                 className="diff-view-btn active"
-                title="当前为变更对比视图"
+                title={t("diff.diffModeActiveTooltip")}
               >
-                差异对比
+                {t("diff.diffMode")}
               </button>
               <button
                 type="button"
                 className="diff-view-btn"
                 onClick={onSwitchToFile}
-                title="查看该文件的完整源码内容"
+                title={t("diff.fullFileTooltip")}
               >
-                完整文件
+                {t("diff.fullFileMode")}
               </button>
             </div>
           )}
@@ -221,13 +214,13 @@ export default function DiffViewer({
                 className={`diff-view-btn ${view === "unstaged" ? "active" : ""}`}
                 onClick={() => onViewChange("unstaged")}
               >
-                工作区 (Working)
+                {t("diff.workingDiff")}
               </button>
               <button
                 className={`diff-view-btn ${view === "staged" ? "active" : ""}`}
                 onClick={() => onViewChange("staged")}
               >
-                暂存区 (Index)
+                {t("diff.indexDiff")}
               </button>
             </div>
           )}
@@ -236,16 +229,16 @@ export default function DiffViewer({
             <button
               className={`diff-view-btn ${layout === "unified" ? "active" : ""}`}
               onClick={() => changeLayout("unified")}
-              title="统一视图：增删行上下排列"
+              title={t("diff.unifiedTooltip")}
             >
-              统一
+              {t("diff.unified")}
             </button>
             <button
               className={`diff-view-btn ${layout === "split" ? "active" : ""}`}
               onClick={() => changeLayout("split")}
-              title="双栏视图：原版本与新版本左右对比"
+              title={t("diff.splitTooltip")}
             >
-              双栏
+              {t("diff.split")}
             </button>
           </div>
         </div>
@@ -260,7 +253,7 @@ export default function DiffViewer({
                 backgroundColor: `var(--${displayStatus}-color, var(--text-secondary))`,
               }}
             />
-            <span>{statusLabel(displayStatus)}</span>
+            <span>{statusLabel}</span>
           </div>
 
           {!diff.is_binary && (
@@ -278,10 +271,10 @@ export default function DiffViewer({
             type="button"
             className={`diff-toolbar-btn ${wrap ? "active" : ""}`}
             onClick={() => setWrap((w) => !w)}
-            title={wrap ? "取消自动换行（单行横向滚动）" : "开启自动换行（防止超长代码被遮挡）"}
+            title={wrap ? t("diff.wrapLinesOff") : t("diff.wrapLinesOn")}
           >
             <WrapText size={12} />
-            <span>换行</span>
+            <span>{t("diff.wrapLines")}</span>
           </button>
 
           {repoPath && !isDeleted && (
@@ -290,15 +283,15 @@ export default function DiffViewer({
                 type="button"
                 className={`diff-open-with-btn ${openMenuOpen ? "open" : ""}`}
                 onClick={() => setOpenMenuOpen((v) => !v)}
-                title="选择打开方式"
+                title={t("toolbar.chooseOpenMethod")}
               >
                 <ExternalLink size={11} />
-                <span>打开方式</span>
+                <span>{t("diff.openWith")}</span>
                 <ChevronDown size={11} />
               </button>
               {openMenuOpen && (
                 <div className="diff-open-with-menu">
-                  {OPEN_METHODS.map((item) => (
+                  {openMethods.map((item) => (
                     <button
                       key={item.id}
                       type="button"
@@ -315,7 +308,7 @@ export default function DiffViewer({
 
           {!hasBoth && (
             <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text-muted)" }}>
-              {contextLabel ?? (view === "staged" ? "暂存区变更 (Staged)" : "工作区未暂存 (Unstaged)")}
+              {contextLabel ?? (view === "staged" ? t("diff.stagedNotice") : t("diff.unstagedNotice"))}
             </span>
           )}
         </div>
@@ -340,6 +333,7 @@ function ImageDiffBody({
   repoPath?: string;
   filePath?: string;
 }) {
+  const { t } = useI18n();
   const [url, setUrl] = useState<string | null>(null);
   const [dim, setDim] = useState<{ w: number; h: number } | null>(null);
   const [zoom, setZoom] = useState<"fit" | "original">("fit");
@@ -379,9 +373,9 @@ function ImageDiffBody({
     return (
       <div className="binary-notice">
         <ImageIcon size={36} strokeWidth={1.5} />
-        <div>图片文件：{filePath}</div>
+        <div>{t("diff.imageFile")}{filePath}</div>
         <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
-          {loadErr || "正在读取图片数据..."}
+          {loadErr || t("diff.readingImageData")}
         </div>
       </div>
     );
@@ -391,16 +385,16 @@ function ImageDiffBody({
     <div className={`diff-image-preview-wrap ${zoom === "original" ? "original-size" : "fit-size"}`}>
       <div className="diff-image-toolbar">
         <span className="diff-image-info">
-          图片预览 {dim ? `(${dim.w} × ${dim.h} px)` : ""}
+          {t("diff.imagePreview")} {dim ? `(${dim.w} × ${dim.h} px)` : ""}
         </span>
         <button
           type="button"
           className={`diff-toolbar-btn ${zoom === "original" ? "active" : ""}`}
           onClick={() => setZoom((z) => (z === "fit" ? "original" : "fit"))}
-          title={zoom === "fit" ? "自适应窗口，点击切换至 1:1 原始尺寸" : "原始尺寸，点击切换至自适应窗口"}
+          title={zoom === "fit" ? t("diff.fitTooltip") : t("diff.originalTooltip")}
         >
           {zoom === "fit" ? <Maximize2 size={12} /> : <Minimize2 size={12} />}
-          <span>{zoom === "fit" ? "自适应" : "1:1"}</span>
+          <span>{zoom === "fit" ? t("diff.fit") : t("diff.original")}</span>
         </button>
       </div>
       <div className="diff-image-canvas">
@@ -458,6 +452,7 @@ export function DiffBody({
   wrap?: boolean;
   repoPath?: string;
 }) {
+  const { t } = useI18n();
   const language = useMemo(
     () => (filePath ? languageForPath(filePath) : null),
     [filePath],
@@ -474,7 +469,7 @@ export function DiffBody({
       {diff.is_binary && !isImageFile && (
         <div className="binary-notice">
           <Binary size={36} strokeWidth={1.5} />
-          <div>二进制文件，无法展示文本 Diff</div>
+          <div>{t("diff.binaryNotice")}</div>
         </div>
       )}
 
@@ -483,8 +478,8 @@ export function DiffBody({
           <div className="empty-state-icon-wrapper" style={{ color: "var(--added-color)" }}>
             <CheckCircle2 size={32} strokeWidth={1.5} />
           </div>
-          <div className="empty-state-text">无内容变动</div>
-          <div className="empty-state-sub">文件内容与基准版本一致</div>
+          <div className="empty-state-text">{t("diff.noContentChanges")}</div>
+          <div className="empty-state-sub">{t("diff.contentIdentical")}</div>
         </div>
       )}
 
@@ -493,7 +488,7 @@ export function DiffBody({
           <div className="empty-state-icon-wrapper" style={{ color: "var(--error-color)" }}>
             <AlertTriangle size={32} strokeWidth={1.5} />
           </div>
-          <div className="empty-state-text">获取 Diff 失败</div>
+          <div className="empty-state-text">{t("diff.diffError")}</div>
           <div style={{ fontSize: 12, color: "var(--error-color)", maxWidth: 440, textAlign: "center", marginTop: 4 }}>
             {diff.error}
           </div>

@@ -12,6 +12,7 @@ import { getFileDiff } from "../api/tauri";
 import { DiffBody, saveDiffLayout } from "./DiffViewer";
 import type { DiffLayout } from "./DiffViewer";
 import type { ChangedFile, DiffView, FileDiff, FileStatus, GitStatus } from "../types";
+import { useI18n } from "../i18n";
 
 interface Entry {
   file: ChangedFile;
@@ -37,11 +38,12 @@ function entryKey(entry: Entry): string {
 /** 全部变更文件的左右对比视图：文件按顺序从上到下连续滚动 */
 export default function AllChangesView({
   status,
-  title = "所有变更文件",
+  title,
 }: {
   status: GitStatus;
   title?: string;
 }) {
+  const { t } = useI18n();
   // 全部变更对比默认双栏，每次打开都从双栏开始
   const [layout, setLayout] = useState<DiffLayout>("split");
   const [diffs, setDiffs] = useState<Record<string, FileDiff>>({});
@@ -50,6 +52,8 @@ export default function AllChangesView({
   const [collapsedKeys, setCollapsedKeys] = useState<Set<string>>(new Set());
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [wrap, setWrap] = useState(false);
+
+  const displayTitle = title ?? t("allChanges.allChangesTitle");
 
   const entries = useMemo<Entry[]>(() => {
     const list: Entry[] = [];
@@ -131,7 +135,7 @@ export default function AllChangesView({
     <div className="all-changes-view">
       <div className="all-changes-toolbar">
         <span className="all-changes-title">
-          {title}
+          {displayTitle}
           <span className="all-changes-count">{entries.length}</span>
         </span>
 
@@ -141,10 +145,10 @@ export default function AllChangesView({
               type="button"
               className="all-changes-tool-btn"
               onClick={toggleAllCollapse}
-              title={allCollapsed ? "展开所有文件 Diff" : "折叠所有文件 Diff"}
+              title={allCollapsed ? t("allChanges.expandAllTooltip") : t("allChanges.collapseAllTooltip")}
             >
               {allCollapsed ? <ChevronsUpDown size={13} /> : <ChevronsDownUp size={13} />}
-              <span>{allCollapsed ? "全部展开" : "全部折叠"}</span>
+              <span>{allCollapsed ? t("allChanges.expandAll") : t("allChanges.collapseAll")}</span>
             </button>
           )}
 
@@ -152,26 +156,26 @@ export default function AllChangesView({
             type="button"
             className={`all-changes-tool-btn ${wrap ? "active" : ""}`}
             onClick={() => setWrap((w) => !w)}
-            title={wrap ? "取消自动换行" : "开启自动换行"}
+            title={wrap ? t("diff.wrapLinesOff") : t("diff.wrapLinesOn")}
           >
             <WrapText size={13} />
-            <span>换行</span>
+            <span>{t("diff.wrapLines")}</span>
           </button>
 
           <div className="diff-view-toggle">
             <button
               className={`diff-view-btn ${layout === "unified" ? "active" : ""}`}
               onClick={() => changeLayout("unified")}
-              title="统一视图：增删行上下排列"
+              title={t("diff.unifiedTooltip")}
             >
-              统一
+              {t("diff.unified")}
             </button>
             <button
               className={`diff-view-btn ${layout === "split" ? "active" : ""}`}
               onClick={() => changeLayout("split")}
-              title="双栏视图：原版本与新版本左右对比"
+              title={t("diff.splitTooltip")}
             >
-              双栏
+              {t("diff.split")}
             </button>
           </div>
         </div>
@@ -181,12 +185,12 @@ export default function AllChangesView({
         {showInitialLoading && (
           <div className="all-changes-loading">
             <Loader2 size={20} className="spin" />
-            <span>正在加载变更内容…</span>
+            <span>{t("allChanges.loadingChanges")}</span>
           </div>
         )}
 
         {!showInitialLoading && entries.length === 0 && (
-          <div className="all-changes-loading">当前没有变更文件</div>
+          <div className="all-changes-loading">{t("allChanges.noChangedFiles")}</div>
         )}
 
         {!showInitialLoading &&
@@ -204,7 +208,7 @@ export default function AllChangesView({
                 <div
                   className={`all-diff-file-header ${isCollapsed ? "collapsed" : ""}`}
                   onClick={() => toggleCollapse(key)}
-                  title="点击折叠 / 展开此文件 Diff"
+                  title={t("allChanges.toggleFileCollapseTooltip")}
                 >
                   <ChevronDown
                     size={14}
@@ -218,7 +222,7 @@ export default function AllChangesView({
                     type="button"
                     className="all-diff-copy-btn"
                     onClick={(e) => handleCopyPath(e, entry.file.path, key)}
-                    title={copiedKey === key ? "已复制！" : "复制文件路径"}
+                    title={copiedKey === key ? t("common.copied") : t("diff.copyFilePath")}
                   >
                     {copiedKey === key ? (
                       <Check size={11} style={{ color: "var(--added-color)" }} />
@@ -238,7 +242,7 @@ export default function AllChangesView({
 
                 {!isCollapsed &&
                   (errors[key] ? (
-                    <div className="all-diff-error">获取 Diff 失败：{errors[key]}</div>
+                    <div className="all-diff-error">{t("allChanges.getDiffFailed")}{errors[key]}</div>
                   ) : diffs[key] ? (
                     <DiffBody
                       diff={diffs[key]}

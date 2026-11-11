@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { FolderOpen, AlertCircle, X, GitBranch, Settings } from "lucide-react";
 import { getRecentRepos, removeRecentRepo } from "../api/tauri";
 import type { RecentRepo } from "../types";
+import { useI18n } from "../i18n";
 
 interface Props {
   onOpenRepo: (path: string) => void;
@@ -11,6 +12,7 @@ interface Props {
 }
 
 export default function WelcomePage({ onOpenRepo, error, onOpenSettings }: Props) {
+  const { t } = useI18n();
   const [recentRepos, setRecentRepos] = useState<RecentRepo[]>([]);
 
   useEffect(() => {
@@ -22,7 +24,7 @@ export default function WelcomePage({ onOpenRepo, error, onOpenSettings }: Props
       const result = await open({
         directory: true,
         multiple: false,
-        title: "Select Git Repository",
+        title: t("welcome.openDialogTitle"),
       });
       if (result && typeof result === "string") {
         onOpenRepo(result);
@@ -30,7 +32,7 @@ export default function WelcomePage({ onOpenRepo, error, onOpenSettings }: Props
     } catch (e) {
       console.error("Failed to open dialog:", e);
       // Fallback to prompt
-      const path = window.prompt("Enter Git repository path:");
+      const path = window.prompt(t("welcome.enterRepoPath"));
       if (path) {
         onOpenRepo(path);
       }
@@ -54,10 +56,10 @@ export default function WelcomePage({ onOpenRepo, error, onOpenSettings }: Props
           <button
             className="toolbar-btn"
             onClick={onOpenSettings}
-            title="设置 (修改主题等)"
+            title={t("welcome.settingsTooltip")}
           >
             <Settings size={14} />
-            <span>设置</span>
+            <span>{t("settings.title")}</span>
           </button>
         </div>
       )}
@@ -67,8 +69,8 @@ export default function WelcomePage({ onOpenRepo, error, onOpenSettings }: Props
       </div>
 
       <div className="welcome-header">
-        <h1 className="welcome-title">GitLensy</h1>
-        <p className="welcome-subtitle">轻量快速的 Git 变更差异查看工具</p>
+        <h1 className="welcome-title">{t("welcome.title")}</h1>
+        <p className="welcome-subtitle">{t("welcome.subtitle")}</p>
       </div>
 
       {error && (
@@ -81,16 +83,16 @@ export default function WelcomePage({ onOpenRepo, error, onOpenSettings }: Props
       <div className="welcome-actions">
         <button className="welcome-btn primary" onClick={handleBrowse}>
           <FolderOpen size={18} strokeWidth={2} />
-          <span>打开 Git 仓库</span>
+          <span>{t("welcome.openRepo")}</span>
         </button>
       </div>
 
       {recentRepos.length > 0 && (
         <div className="recent-repos">
           <div className="recent-repos-header">
-            <span className="recent-repos-title">最近打开</span>
+            <span className="recent-repos-title">{t("welcome.recentRepos")}</span>
             <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-              {recentRepos.length} 个仓库
+              {t("welcome.repoCount", { count: recentRepos.length })}
             </span>
           </div>
           <div className="recent-repos-list">
@@ -108,7 +110,7 @@ export default function WelcomePage({ onOpenRepo, error, onOpenSettings }: Props
                 </div>
                 <button
                   className="diff-copy-btn"
-                  title="从最近列表中移除"
+                  title={t("welcome.removeFromRecent")}
                   onClick={(e) => handleRemoveRecent(e, repo.path)}
                 >
                   <X size={14} />

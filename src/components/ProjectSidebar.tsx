@@ -18,6 +18,7 @@ import FolderTree from "./FolderTree";
 import RepoAvatar from "./RepoAvatar";
 import { getRepoChangeCount, openPath } from "../api/tauri";
 import type { GitStatus, RecentRepo } from "../types";
+import { useI18n } from "../i18n";
 
 /** 单个项目节点：标题行可切换仓库，箭头展开复用「文件夹」tab 的目录树 */
 function ProjectNode({
@@ -47,6 +48,7 @@ function ProjectNode({
   onRemove: (path: string) => void;
   onContextMenu: (e: React.MouseEvent, repo: RecentRepo) => void;
 }) {
+  const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   // 当有搜索词且当前项目为激活项目时，自动展开以便显示搜索结果
   const isExpanded = expanded || (Boolean(filter.trim()) && active);
@@ -68,7 +70,7 @@ function ProjectNode({
           type="button"
           className="project-node-toggle"
           onClick={toggle}
-          title={isExpanded ? "收起目录" : "展开目录"}
+          title={isExpanded ? t("projectSidebar.collapseTree") : t("projectSidebar.expandTree")}
         >
           {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         </button>
@@ -78,20 +80,20 @@ function ProjectNode({
         />
         <span className="project-node-name">{repo.name}</span>
         {active && currentBranch && (
-          <span className="project-node-branch" title={`当前分支: ${currentBranch}`}>
+          <span className="project-node-branch" title={t("projectSidebar.currentBranch", { branch: currentBranch })}>
             <GitBranch size={10} />
             <span>{currentBranch}</span>
           </span>
         )}
         {changeCount !== null && changeCount > 0 && (
-          <span className="project-node-count" title={`${changeCount} 处变更`}>
+          <span className="project-node-count" title={t("projectSidebar.changesCount", { count: changeCount })}>
             {changeCount}
           </span>
         )}
         <button
           type="button"
           className="project-node-remove"
-          title="从项目列表移除"
+          title={t("projectSidebar.removeFromRecent")}
           onClick={(e) => {
             e.stopPropagation();
             onRemove(repo.path);
@@ -146,6 +148,7 @@ export default function ProjectSidebar({
   /** 折叠状态变化时通知父组件（用于隐藏拖拽手柄） */
   onCollapsedChange?: (collapsed: boolean) => void;
 }) {
+  const { t } = useI18n();
   const [collapsed, setCollapsed] = useState(false);
   const [query, setQuery] = useState("");
   const [counts, setCounts] = useState<Record<string, number>>({});
@@ -287,7 +290,7 @@ export default function ProjectSidebar({
             type="button"
             className="project-sidebar-collapse"
             onClick={() => setCollapsed(false)}
-            title="展开项目侧边栏"
+            title={t("projectSidebar.expandSidebar")}
           >
             <PanelLeftOpen size={14} />
           </button>
@@ -300,7 +303,7 @@ export default function ProjectSidebar({
                 : counts[repo.path] ?? null;
             const tooltip =
               count && count > 0
-                ? `${repo.name} (${count} 处变更)\n${repo.path}`
+                ? `${repo.name} (${t("projectSidebar.changesCount", { count })})\n${repo.path}`
                 : `${repo.name}\n${repo.path}`;
 
             return (
@@ -333,7 +336,7 @@ export default function ProjectSidebar({
           <button
             type="button"
             className="project-rail-add"
-            title="打开其他仓库..."
+            title={t("projectSidebar.openOtherRepo")}
             onClick={onOpenOther}
           >
             <Plus size={13} />
@@ -358,7 +361,7 @@ export default function ProjectSidebar({
               }}
             >
               <FolderOpen size={13} />
-              <span>在文件资源管理器中打开</span>
+              <span>{t("projectSidebar.openInExplorer")}</span>
             </button>
             <button
               type="button"
@@ -369,7 +372,7 @@ export default function ProjectSidebar({
               }}
             >
               <ExternalLink size={13} />
-              <span>用外部编辑器打开</span>
+              <span>{t("projectSidebar.openInEditor")}</span>
             </button>
             <button
               type="button"
@@ -380,7 +383,7 @@ export default function ProjectSidebar({
               }}
             >
               <Copy size={13} />
-              <span>复制仓库绝对路径</span>
+              <span>{t("projectSidebar.copyRepoPath")}</span>
             </button>
             <div className="context-menu-hint" />
             <button
@@ -393,7 +396,7 @@ export default function ProjectSidebar({
               }}
             >
               <Trash2 size={13} />
-              <span>从最近列表移除</span>
+              <span>{t("projectSidebar.removeFromRecent")}</span>
             </button>
           </div>
         )}
@@ -410,7 +413,7 @@ export default function ProjectSidebar({
           type="button"
           className="project-sidebar-collapse"
           onClick={() => setCollapsed(true)}
-          title="收起项目侧边栏"
+          title={t("projectSidebar.collapseSidebar")}
         >
           <PanelLeftClose size={14} />
         </button>
@@ -421,7 +424,7 @@ export default function ProjectSidebar({
         <input
           type="text"
           className="project-sidebar-search-input"
-          placeholder="搜索项目或文件..."
+          placeholder={t("common.search")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -430,7 +433,7 @@ export default function ProjectSidebar({
             type="button"
             className="project-sidebar-search-clear"
             onClick={() => setQuery("")}
-            title="清空搜索"
+            title={t("commitList.clearSearchTooltip")}
           >
             <X size={12} />
           </button>
@@ -457,12 +460,12 @@ export default function ProjectSidebar({
             onContextMenu={handleContextMenu}
           />
         ))}
-        {orderedList.length === 0 && <div className="project-tree-loading">没有匹配的项目</div>}
+        {orderedList.length === 0 && <div className="project-tree-loading">{t("projectSidebar.noMatchingFiles")}</div>}
       </div>
 
       <button type="button" className="project-sidebar-add" onClick={onOpenOther}>
         <Plus size={13} />
-        <span>打开其他仓库...</span>
+        <span>{t("projectSidebar.openOtherRepo")}</span>
       </button>
 
       {contextMenu && (
@@ -483,7 +486,7 @@ export default function ProjectSidebar({
             }}
           >
             <FolderOpen size={13} />
-            <span>在文件资源管理器中打开</span>
+            <span>{t("projectSidebar.openInExplorer")}</span>
           </button>
           <button
             type="button"
@@ -494,7 +497,7 @@ export default function ProjectSidebar({
             }}
           >
             <ExternalLink size={13} />
-            <span>用外部编辑器打开</span>
+            <span>{t("projectSidebar.openInEditor")}</span>
           </button>
           <button
             type="button"
@@ -505,7 +508,7 @@ export default function ProjectSidebar({
             }}
           >
             <Copy size={13} />
-            <span>复制仓库绝对路径</span>
+            <span>{t("projectSidebar.copyRepoPath")}</span>
           </button>
           <div className="context-menu-hint" />
           <button
@@ -518,7 +521,7 @@ export default function ProjectSidebar({
             }}
           >
             <Trash2 size={13} />
-            <span>从最近列表移除</span>
+            <span>{t("projectSidebar.removeFromRecent")}</span>
           </button>
         </div>
       )}

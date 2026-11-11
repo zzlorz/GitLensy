@@ -6,6 +6,8 @@ import {
   PREVIEW_FONT_SIZE_MAX,
   PREVIEW_FONT_SIZE_MIN,
 } from "../lib/fontSize";
+import { useI18n } from "../i18n";
+import type { SupportedLocale } from "../i18n";
 
 interface Props {
   isOpen: boolean;
@@ -30,6 +32,8 @@ export default function SettingsModal({
   previewFontSize,
   onPreviewFontSizeChange,
 }: Props) {
+  const { locale, setLocale, locales, t } = useI18n();
+
   // 编辑器命令用本地草稿，失焦或回车时才提交，避免输入过程被裁剪
   const [editorDraft, setEditorDraft] = useState(editor);
 
@@ -59,20 +63,20 @@ export default function SettingsModal({
   }[] = [
     {
       id: "dark",
-      label: "暗色模式",
-      description: "经典深色界面，夜间使用更舒适",
+      label: t("settings.darkTheme"),
+      description: t("settings.darkThemeDesc"),
       icon: Moon,
     },
     {
       id: "light",
-      label: "亮色模式",
-      description: "明亮清晰界面，日光环境下更易读",
+      label: t("settings.lightTheme"),
+      description: t("settings.lightThemeDesc"),
       icon: Sun,
     },
     {
       id: "system",
-      label: "跟随系统",
-      description: "自动与操作系统的外观偏好保持同步",
+      label: t("settings.systemTheme"),
+      description: t("settings.systemThemeDesc"),
       icon: Monitor,
     },
   ];
@@ -88,42 +92,81 @@ export default function SettingsModal({
       >
         <div className="settings-modal-header">
           <span className="settings-modal-title" id="settings-modal-title">
-            设置
+            {t("settings.title")}
           </span>
           <button
             className="settings-modal-close"
             onClick={onClose}
-            title="关闭 (Esc)"
+            title={t("settings.closeTooltip")}
           >
             <X size={16} />
           </button>
         </div>
 
         <div className="settings-modal-body">
+          {/* 界面语言设置 */}
           <div className="settings-section">
-            <div className="settings-section-title">主题外观</div>
+            <div className="settings-section-title">{t("settings.languageSection")}</div>
             <div className="settings-section-desc">
-              切换应用程序的整体显示风格（暗色 / 亮色）
+              {t("settings.languageDesc")}
             </div>
 
-            <div className="theme-options-grid">
-              {themes.map((t) => {
-                const Icon = t.icon;
-                const isSelected = theme === t.id;
+            <div className="language-options-grid">
+              {locales.map((item) => {
+                const isSelected = locale === item.id;
                 return (
                   <div
-                    key={t.id}
-                    className={`theme-option-card ${isSelected ? "selected" : ""}`}
-                    onClick={() => onThemeChange(t.id)}
+                    key={item.id}
+                    className={`language-option-card ${isSelected ? "selected" : ""}`}
+                    onClick={() => setLocale(item.id as SupportedLocale)}
                     role="button"
                     tabIndex={0}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" || e.key === " ") {
-                        onThemeChange(t.id);
+                        setLocale(item.id as SupportedLocale);
                       }
                     }}
                   >
-                    <div className={`theme-card-preview theme-preview-${t.id}`}>
+                    <div className="language-option-info">
+                      <div className="language-option-name">{item.nativeName}</div>
+                      <div className="language-option-sub">{item.englishName}</div>
+                    </div>
+                    {isSelected && (
+                      <div className="theme-check-badge">
+                        <Check size={12} strokeWidth={2.5} />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 主题外观设置 */}
+          <div className="settings-section">
+            <div className="settings-section-title">{t("settings.appearanceSection")}</div>
+            <div className="settings-section-desc">
+              {t("settings.appearanceDesc")}
+            </div>
+
+            <div className="theme-options-grid">
+              {themes.map((item) => {
+                const Icon = item.icon;
+                const isSelected = theme === item.id;
+                return (
+                  <div
+                    key={item.id}
+                    className={`theme-option-card ${isSelected ? "selected" : ""}`}
+                    onClick={() => onThemeChange(item.id)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        onThemeChange(item.id);
+                      }
+                    }}
+                  >
+                    <div className={`theme-card-preview theme-preview-${item.id}`}>
                       <div className="theme-preview-sidebar" />
                       <div className="theme-preview-content">
                         <div className="theme-preview-line line-header" />
@@ -135,14 +178,14 @@ export default function SettingsModal({
                     <div className="theme-option-info">
                       <div className="theme-option-header">
                         <Icon size={14} className="theme-option-icon" />
-                        <span className="theme-option-label">{t.label}</span>
+                        <span className="theme-option-label">{item.label}</span>
                         {isSelected && (
                           <div className="theme-check-badge">
                             <Check size={12} strokeWidth={2.5} />
                           </div>
                         )}
                       </div>
-                      <div className="theme-option-desc">{t.description}</div>
+                      <div className="theme-option-desc">{item.description}</div>
                     </div>
                   </div>
                 );
@@ -150,17 +193,18 @@ export default function SettingsModal({
             </div>
           </div>
 
+          {/* 预览字号 */}
           <div className="settings-section">
-            <div className="settings-section-title">预览字号</div>
+            <div className="settings-section-title">{t("settings.fontSizeSection")}</div>
             <div className="settings-section-desc">
-              调整 Diff 与文件预览的代码字号，修改后立即生效并自动保存。
+              {t("settings.fontSizeDesc")}
             </div>
 
             <div className="settings-font-row">
               <button
                 type="button"
                 className="settings-font-step"
-                title="减小字号"
+                title={t("settings.decreaseFontSize")}
                 disabled={previewFontSize <= PREVIEW_FONT_SIZE_MIN}
                 onClick={() =>
                   onPreviewFontSizeChange(Math.max(PREVIEW_FONT_SIZE_MIN, previewFontSize - 1))
@@ -176,12 +220,12 @@ export default function SettingsModal({
                 step={1}
                 value={previewFontSize}
                 onChange={(e) => onPreviewFontSizeChange(Number(e.target.value))}
-                aria-label="预览字号"
+                aria-label={t("settings.fontSizeSection")}
               />
               <button
                 type="button"
                 className="settings-font-step"
-                title="增大字号"
+                title={t("settings.increaseFontSize")}
                 disabled={previewFontSize >= PREVIEW_FONT_SIZE_MAX}
                 onClick={() =>
                   onPreviewFontSizeChange(Math.min(PREVIEW_FONT_SIZE_MAX, previewFontSize + 1))
@@ -195,7 +239,7 @@ export default function SettingsModal({
                 className="settings-editor-reset"
                 onClick={() => onPreviewFontSizeChange(PREVIEW_FONT_SIZE_DEFAULT)}
               >
-                恢复默认
+                {t("common.resetDefault")}
               </button>
             </div>
 
@@ -204,18 +248,23 @@ export default function SettingsModal({
               style={{ fontSize: `${previewFontSize}px` }}
             >
               <code>
-                <span className="settings-font-comment">// 预览字号 {previewFontSize}px</span>
+                <span className="settings-font-comment">
+                  {t("settings.fontSizePreviewComment", { size: previewFontSize })}
+                </span>
                 {"\n"}
                 <span className="settings-font-keyword">const</span> message ={" "}
-                <span className="settings-font-string">"可读性刚刚好"</span>;
+                <span className="settings-font-string">
+                  &quot;{t("settings.fontSizePreviewString")}&quot;
+                </span>;
               </code>
             </pre>
           </div>
 
+          {/* 外部编辑器 */}
           <div className="settings-section">
-            <div className="settings-section-title">外部编辑器</div>
+            <div className="settings-section-title">{t("settings.editorSection")}</div>
             <div className="settings-section-desc">
-              「在编辑器中打开」项目或文件时使用的命令，默认为 VS Code 的 code。
+              {t("settings.editorDesc")}
             </div>
             <div className="settings-editor-row">
               <input
@@ -241,18 +290,18 @@ export default function SettingsModal({
                   onEditorChange("code");
                 }}
               >
-                恢复默认
+                {t("common.resetDefault")}
               </button>
             </div>
             <div className="settings-editor-hint">
-              也可填写 cursor、subl、idea 等可执行命令；未安装时打开会提示失败。
+              {t("settings.editorHint")}
             </div>
           </div>
         </div>
 
         <div className="settings-modal-footer">
           <button className="settings-modal-btn primary" onClick={onClose}>
-            完成
+            {t("settings.done")}
           </button>
         </div>
       </div>

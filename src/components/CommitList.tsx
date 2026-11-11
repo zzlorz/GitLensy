@@ -12,6 +12,7 @@ import {
   Loader2,
 } from "lucide-react";
 import type { CommitInfo } from "../types";
+import { useI18n } from "../i18n";
 
 interface Props {
   commits: CommitInfo[];
@@ -163,6 +164,7 @@ function CommitItem({
   onToggleCompareBase: (commit: CommitInfo) => void;
   onContextMenu: (e: React.MouseEvent, commit: CommitInfo) => void;
 }) {
+  const { t, formatDate, formatRelativeTime } = useI18n();
   const isMerge = commit.parent_count >= 2;
   const nodeX = laneX(row.lane);
   const nodeY = ROW_HEIGHT / 2;
@@ -173,12 +175,14 @@ function CommitItem({
     navigator.clipboard?.writeText(commit.hash);
   };
 
+  const relativeDate = formatRelativeTime(commit.date);
+
   return (
     <div
       className={`commit-item ${selected ? "selected" : ""} ${compareBase ? "compare-base" : ""}`}
       onClick={onClick}
       onContextMenu={(e) => onContextMenu(e, commit)}
-      title={`${commit.subject}\n作者: ${commit.author_name}\n哈希: ${commit.hash}`}
+      title={`${commit.subject}\n${commit.author_name}\n${commit.hash}`}
     >
       <div className="commit-item-graph" style={{ width: graphWidth }}>
         <svg width={graphWidth} height={ROW_HEIGHT} className="commit-graph-svg">
@@ -248,24 +252,24 @@ function CommitItem({
 
       <div className="commit-item-content">
         <div className="commit-subject" title={commit.subject}>
-          {commit.subject || "(no message)"}
+          {commit.subject || t("allChanges.noMessage")}
         </div>
         <div className="commit-meta">
           <span
             className="commit-hash"
-            title={`完整 SHA: ${commit.hash}\n点击复制`}
+            title={`SHA: ${commit.hash}`}
             onClick={handleCopyHash}
           >
             {commit.short_hash}
           </span>
           <span
             className="commit-author"
-            title={`作者: ${commit.author_name} <${commit.author_email}>`}
+            title={`${commit.author_name} <${commit.author_email}>`}
           >
             {commit.author_name}
           </span>
           <span className="commit-date" title={formatDate(commit.date)}>
-            {commit.date_relative}
+            {relativeDate}
           </span>
         </div>
       </div>
@@ -277,27 +281,12 @@ function CommitItem({
           e.stopPropagation();
           onToggleCompareBase(commit);
         }}
-        title={compareBase ? "取消对比基准" : "设为对比基准，再点击另一条提交进行对比"}
+        title={compareBase ? t("commitList.unsetCompareBase") : t("commitList.setCompareBase")}
       >
         <GitCompare size={13} />
       </button>
     </div>
   );
-}
-
-/** Format an ISO-8601 date string to a readable local date. */
-function formatDate(iso: string): string {
-  try {
-    return new Date(iso).toLocaleDateString(undefined, {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return iso;
-  }
 }
 
 export default function CommitList({
@@ -320,6 +309,7 @@ export default function CommitList({
   onCreateBranch,
   onCreateTag,
 }: Props) {
+  const { t } = useI18n();
   const sentinelRef = useRef<HTMLDivElement>(null);
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -397,8 +387,8 @@ export default function CommitList({
         onClick={onSelectUncommitted}
         title={
           uncommittedCount > 0
-            ? `工作区存在 ${uncommittedCount} 处变更 (已暂存: ${stagedCount}, 未暂存: ${unstagedCount})`
-            : "工作区干净，无未提交变更"
+            ? t("commitList.uncommittedChangesTooltip", { count: uncommittedCount, staged: stagedCount, unstaged: unstagedCount })
+            : t("commitList.workspaceCleanTooltip")
         }
       >
         <div className="commit-item-graph commit-uncommitted-graph" style={{ width: graphWidth }}>
@@ -466,7 +456,7 @@ export default function CommitList({
 
         <div className="commit-item-content">
           <div className="commit-subject uncommitted-subject">
-            <span className="uncommitted-title">未提交的变更</span>
+            <span className="uncommitted-title">{t("commitList.uncommitted")}</span>
             {uncommittedCount > 0 && <span className="uncommitted-badge">{uncommittedCount}</span>}
           </div>
           <div className="commit-meta">
@@ -475,29 +465,29 @@ export default function CommitList({
                 {stagedCount > 0 && (
                   <span
                     className="uncommitted-meta-chip staged"
-                    title={`${stagedCount} 个文件已暂存，可随时提交`}
+                    title={t("commitList.stagedTagTooltip", { count: stagedCount })}
                   >
                     <span className="uncommitted-chip-dot staged" />
-                    <span>{stagedCount} 暂存</span>
+                    <span>{t("commitList.stagedTag", { count: stagedCount })}</span>
                   </span>
                 )}
                 {unstagedCount > 0 && (
                   <span
                     className="uncommitted-meta-chip unstaged"
-                    title={`${unstagedCount} 个文件未暂存`}
+                    title={t("commitList.unstagedTagTooltip", { count: unstagedCount })}
                   >
                     <span className="uncommitted-chip-dot unstaged" />
-                    <span>{unstagedCount} 未暂存</span>
+                    <span>{t("commitList.unstagedTag", { count: unstagedCount })}</span>
                   </span>
                 )}
                 {stagedCount === 0 && unstagedCount === 0 && (
                   <span className="commit-uncommitted-count dirty">
-                    {uncommittedCount} 个文件修改
+                    {t("commitList.filesChangedTag", { count: uncommittedCount })}
                   </span>
                 )}
               </div>
             ) : (
-              <span className="commit-uncommitted-clean-text">工作区干净 (Clean)</span>
+              <span className="commit-uncommitted-clean-text">{t("commitList.cleanText")}</span>
             )}
           </div>
         </div>
@@ -512,7 +502,7 @@ export default function CommitList({
           <div className="commit-compare-banner-left">
             <GitCompare size={13} className="commit-compare-banner-icon" />
             <span>
-              对比基准：<code>{compareBaseHash.slice(0, 7)}</code>
+              {t("commitList.compareBase")}<code>{compareBaseHash.slice(0, 7)}</code>
             </span>
           </div>
           <button
@@ -522,9 +512,9 @@ export default function CommitList({
               const base = commits.find((c) => c.hash === compareBaseHash);
               if (base && onToggleCompareBase) onToggleCompareBase(base);
             }}
-            title="退出对比模式"
+            title={t("commitList.compareExitTooltip")}
           >
-            取消
+            {t("commitList.compareExit")}
           </button>
         </div>
       )}
@@ -554,19 +544,19 @@ export default function CommitList({
       {loading && (
         <div className="commit-list-loading">
           <Loader2 size={14} className="spin" />
-          <span>加载中...</span>
+          <span>{t("commitList.loadingMore")}</span>
         </div>
       )}
 
       {!loading && commits.length === 0 && (
         <div className="commit-list-empty-inline">
           <GitCommit size={22} strokeWidth={1.5} style={{ opacity: 0.3 }} />
-          <span>暂无提交记录</span>
+          <span>{t("commitList.noCommits")}</span>
         </div>
       )}
 
       {!loading && !hasMore && commits.length > 0 && (
-        <div className="commit-list-end">— 已显示全部提交 —</div>
+        <div className="commit-list-end">{t("commitList.allCommitsLoaded")}</div>
       )}
 
       {/* 提交右键上下文菜单 */}
@@ -577,7 +567,7 @@ export default function CommitList({
           onClick={(e) => e.stopPropagation()}
         >
           <div className="context-menu-title" title={contextMenu.commit.subject}>
-            {contextMenu.commit.short_hash} · {contextMenu.commit.subject || "(no message)"}
+            {contextMenu.commit.short_hash} · {contextMenu.commit.subject || t("allChanges.noMessage")}
           </div>
           <button
             type="button"
@@ -588,7 +578,7 @@ export default function CommitList({
             }}
           >
             <Copy size={13} />
-            <span>复制短哈希 ({contextMenu.commit.short_hash})</span>
+            <span>{t("commitList.copyShortHash", { hash: contextMenu.commit.short_hash })}</span>
           </button>
           <button
             type="button"
@@ -599,7 +589,7 @@ export default function CommitList({
             }}
           >
             <Copy size={13} />
-            <span>复制完整 SHA</span>
+            <span>{t("commitList.copyFullSha")}</span>
           </button>
           <button
             type="button"
@@ -610,7 +600,7 @@ export default function CommitList({
             }}
           >
             <Copy size={13} />
-            <span>复制提交说明</span>
+            <span>{t("commitList.copySubject")}</span>
           </button>
           <div className="toolbar-menu-divider" />
           <button
@@ -623,7 +613,7 @@ export default function CommitList({
           >
             <GitCompare size={13} />
             <span>
-              {compareBaseHash === contextMenu.commit.hash ? "取消对比基准" : "设为对比基准"}
+              {compareBaseHash === contextMenu.commit.hash ? t("commitList.unsetCompareBase") : t("commitList.setCompareBase")}
             </span>
           </button>
           {onCherryPick && (
@@ -636,7 +626,7 @@ export default function CommitList({
               }}
             >
               <GitPullRequest size={13} />
-              <span>遴选到当前分支 (Cherry-pick)</span>
+              <span>{t("commitList.cherryPickToCurrent")}</span>
             </button>
           )}
           {onCheckout && (
@@ -649,7 +639,7 @@ export default function CommitList({
               }}
             >
               <GitCommit size={13} />
-              <span>检出此提交 (Checkout)</span>
+              <span>{t("commitList.checkoutCommit")}</span>
             </button>
           )}
           {onCreateBranch && (
@@ -662,7 +652,7 @@ export default function CommitList({
               }}
             >
               <GitBranch size={13} />
-              <span>基于此提交新建分支...</span>
+              <span>{t("commitList.createBranchFromCommit")}</span>
             </button>
           )}
           {onCreateTag && (
@@ -675,7 +665,7 @@ export default function CommitList({
               }}
             >
               <Tag size={13} />
-              <span>为此提交新建标签...</span>
+              <span>{t("commitList.createTagFromCommit")}</span>
             </button>
           )}
         </div>

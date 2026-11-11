@@ -8,6 +8,7 @@ import {
   FileQuestion,
   X,
   ExternalLink,
+  ChevronDown,
   Copy,
   Check,
   Diff,
@@ -15,9 +16,11 @@ import {
   Maximize2,
   Minimize2,
 } from "lucide-react";
-import { getFileDiff, openInEditor } from "../api/tauri";
+import { getFileDiff, openPath } from "../api/tauri";
+import type { OpenMethod } from "../api/tauri";
 import type { ChangedFile, DiffView, FileDiff } from "../types";
 import { ensureHighlightTheme, getExtension, highlightCode } from "../lib/highlight";
+import { useI18n } from "../i18n";
 
 interface Props {
   fullPath: string;
@@ -143,6 +146,7 @@ export default function FilePreview({
   onClose,
   onSwitchToDiff,
 }: Props) {
+  const { t } = useI18n();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fileSize, setFileSize] = useState<number>(0);
@@ -159,8 +163,45 @@ export default function FilePreview({
   const [copiedPath, setCopiedPath] = useState(false);
   const [copiedContent, setCopiedContent] = useState(false);
   const [wrapLines, setWrapLines] = useState(false);
+  const [openMenuOpen, setOpenMenuOpen] = useState(false);
+  const openMenuRef = useRef<HTMLDivElement>(null);
   const objectUrlRef = useRef<string | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
+
+  const openMethods: { id: OpenMethod; label: string }[] = useMemo(
+    () => [
+      { id: "editor", label: t("openMethods.editor") },
+      { id: "explorer", label: t("openMethods.explorer") },
+      { id: "system", label: t("openMethods.system") },
+    ],
+    [t],
+  );
+
+  // 每次切换文件关闭「打开方式」下拉
+  useEffect(() => {
+    setOpenMenuOpen(false);
+  }, [fullPath]);
+
+  // 点击外部关闭「打开方式」下拉
+  useEffect(() => {
+    if (!openMenuOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (openMenuRef.current && !openMenuRef.current.contains(e.target as Node)) {
+        setOpenMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [openMenuOpen]);
+
+  const handleOpenWith = async (method: OpenMethod) => {
+    setOpenMenuOpen(false);
+    try {
+      await openPath(fullPath, method);
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   // 高亮主题由共享模块统一注入并跟随 data-theme 切换
   useEffect(() => {
@@ -270,7 +311,7 @@ export default function FilePreview({
           if (size > MAX_IMAGE_SIZE) {
             if (cancelled) return;
             setFileType("image");
-            setError(`文件过大 (${formatSize(size)})，超过 ${formatSize(MAX_IMAGE_SIZE)}，无法预览`);
+            setError(t("filePreview.fileTooLarge", { size: formatSize(size), max: formatSize(MAX_IMAGE_SIZE) }));
             setLoading(false);
             return;
           }
@@ -305,7 +346,7 @@ export default function FilePreview({
 
     load();
     return () => { cancelled = true; };
-  }, [fullPath]);
+  }, [fullPath, t]);
 
   const highlightedLines = useMemo(
     () => (highlighted !== null ? splitHighlightedLines(highlighted) : []),
@@ -339,7 +380,7 @@ export default function FilePreview({
         <div className="empty-state-icon-wrapper">
           <Loader2 size={32} className="spin" />
         </div>
-        <div className="empty-state-text">正在读取文件...</div>
+        <div className="empty-state-text">{t("filePreview.readingFile")}</div>
         <div className="empty-state-sub">{relPath}</div>
       </div>
     );
@@ -351,7 +392,7 @@ export default function FilePreview({
         <div className="empty-state-icon-wrapper" style={{ color: "var(--error-color)" }}>
           <AlertTriangle size={28} strokeWidth={1.5} />
         </div>
-        <div className="empty-state-text">无法读取文件</div>
+        <div className="empty-state-text">{t("filePreview.cannotReadFile")}</div>
         <div style={{ fontSize: 12, color: "var(--error-color)", textAlign: "center", maxWidth: 500 }}>
           {error}
         </div>
@@ -379,7 +420,7 @@ export default function FilePreview({
             type="button"
             className="file-preview-copy-btn"
             onClick={handleCopyPath}
-            title={copiedPath ? "已复制文件路径！" : "复制相对路径"}
+            title={copiedPath ? t("filePreview.copiedPath") : t("filePreview.copyRelativePath")}
           >
             {copiedPath ? <Check size={12} style={{ color: "var(--added-color)" }} /> : <Copy size={12} />}
           </button>
@@ -391,10 +432,10 @@ export default function FilePreview({
               type="button"
               className="file-preview-switch-btn"
               onClick={onSwitchToDiff}
-              title="切换到变更对比视图"
+              title={t("filePreview.switchToDiffTooltip")}
             >
               <Diff size={12} />
-              <span>变更对比</span>
+              <span>{t("filePreview.switchToDiff")}</span>
             </button>
           )}
 
@@ -415,7 +456,7 @@ export default function FilePreview({
               type="button"
               className={`file-preview-action ${imageZoom === "original" ? "active" : ""}`}
               onClick={() => setImageZoom((z) => (z === "fit" ? "original" : "fit"))}
-              title={imageZoom === "fit" ? "当前自适应窗口，点击切换至 1:1 原始尺寸" : "当前原始尺寸，点击自适应窗口"}
+              title={imageZoom === "fit" ? t("diff.fitTooltip") : t("diff.originalTooltip")}
             >
               {imageZoom === "fit" ? <Maximize2 size={13} /> : <Minimize2 size={13} />}
             </button>
@@ -424,12 +465,12 @@ export default function FilePreview({
           {fileSize > 0 && <span className="file-preview-meta-item">{formatSize(fileSize)}</span>}
 
           {hasChanges && (
-            <span className="file-preview-meta-item file-preview-change-count" title="该文件在工作区或暂存区中有变更">
-              {changeMap.lineToBlock.size} 行变更
+            <span className="file-preview-meta-item file-preview-change-count" title={t("filePreview.linesChangedTooltip")}>
+              {t("filePreview.linesChanged", { count: changeMap.lineToBlock.size })}
             </span>
           )}
 
-          {isTruncated && <span className="file-preview-truncated-badge">已截断 (仅前 512KB)</span>}
+          {isTruncated && <span className="file-preview-truncated-badge">{t("filePreview.truncated")}</span>}
 
           {fileType === "text" && (
             <>
@@ -437,7 +478,7 @@ export default function FilePreview({
                 type="button"
                 className={`file-preview-action ${wrapLines ? "active" : ""}`}
                 onClick={() => setWrapLines((w) => !w)}
-                title={wrapLines ? "取消换行（单行横向滚动）" : "自动换行"}
+                title={wrapLines ? t("filePreview.wrapLinesOff") : t("filePreview.wrapLinesOn")}
               >
                 <WrapText size={13} />
               </button>
@@ -445,32 +486,46 @@ export default function FilePreview({
                 type="button"
                 className="file-preview-action"
                 onClick={handleCopyContent}
-                title={copiedContent ? "已复制全文！" : "复制代码全文"}
+                title={copiedContent ? t("filePreview.copiedAllCode") : t("filePreview.copyAllCode")}
               >
                 {copiedContent ? <Check size={13} style={{ color: "var(--added-color)" }} /> : <Copy size={13} />}
               </button>
             </>
           )}
 
-          <button
-            type="button"
-            className="file-preview-action"
-            title="在外部编辑器中打开文件"
-            onClick={() =>
-              openInEditor(fullPath).catch((err) =>
-                window.alert(err instanceof Error ? err.message : String(err))
-              )
-            }
-          >
-            <ExternalLink size={13} />
-          </button>
+          <div className="diff-open-with" ref={openMenuRef}>
+            <button
+              type="button"
+              className={`diff-open-with-btn ${openMenuOpen ? "open" : ""}`}
+              onClick={() => setOpenMenuOpen((v) => !v)}
+              title={t("toolbar.chooseOpenMethod")}
+            >
+              <ExternalLink size={11} />
+              <span>{t("diff.openWith")}</span>
+              <ChevronDown size={11} />
+            </button>
+            {openMenuOpen && (
+              <div className="diff-open-with-menu">
+                {openMethods.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className="diff-open-with-item"
+                    onClick={() => handleOpenWith(item.id)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           {onClose && (
             <button
               type="button"
               className="file-preview-close-btn"
               onClick={onClose}
-              title="关闭预览"
+              title={t("filePreview.closePreview")}
             >
               <X size={14} />
             </button>
@@ -507,7 +562,7 @@ export default function FilePreview({
                     key={lineNo}
                     className={className}
                     onClick={isChanged ? (e) => handleLineClick(e, blockIndex) : undefined}
-                    title={isChanged ? "点击查看变更前后的代码" : undefined}
+                    title={isChanged ? t("filePreview.clickToCompareLines") : undefined}
                   >
                     <span className="file-preview-line-num">{lineNo}</span>
                     <span
@@ -540,9 +595,9 @@ export default function FilePreview({
             <div className="empty-state-icon-wrapper">
               <FileQuestion size={28} strokeWidth={1.5} />
             </div>
-            <div className="empty-state-text">二进制文件</div>
+            <div className="empty-state-text">{t("filePreview.binaryFile")}</div>
             <div className="empty-state-sub">
-              该文件类型暂不支持预览 ({getExtension(fullPath) || "无扩展名"})<br />
+              {t("filePreview.binaryFileSub", { ext: getExtension(fullPath) || t("filePreview.noExtension") })}<br />
               {fileSize > 0 && formatSize(fileSize)}
             </div>
           </div>
@@ -567,12 +622,12 @@ export default function FilePreview({
         return (
           <div className="file-preview-diff-popover" ref={popoverRef} style={{ left, top }}>
             <div className="file-preview-popover-header">
-              <span>变更对比</span>
+              <span>{t("filePreview.changeComparison")}</span>
               <button
                 type="button"
                 className="file-preview-popover-close"
                 onClick={() => setPopover(null)}
-                title="关闭 (Esc)"
+                title={t("common.closeEsc")}
               >
                 <X size={13} />
               </button>

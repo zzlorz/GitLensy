@@ -25,6 +25,7 @@ import {
 import { DiffBody, saveDiffLayout } from "./DiffViewer";
 import type { DiffLayout } from "./DiffViewer";
 import type { CommitFile, CommitInfo, FileDiff, FileStatus } from "../types";
+import { useI18n } from "../i18n";
 
 const BADGES: Record<FileStatus, { text: string; className: string }> = {
   modified: { text: "M", className: "badge-modified" },
@@ -55,6 +56,7 @@ export default function CommitChangesView({
   onClearCompare,
   onCherryPick,
 }: Props) {
+  const { t, formatDate, formatRelativeTime } = useI18n();
   const [layout, setLayout] = useState<DiffLayout>("split");
   const [bodyExpanded, setBodyExpanded] = useState(false);
   const [files, setFiles] = useState<CommitFile[]>([]);
@@ -155,12 +157,14 @@ export default function CommitChangesView({
     setTimeout(() => setCopiedKey(null), 1500);
   };
 
+  const relativeDate = formatRelativeTime(commit.date);
+
   return (
     <div className="all-changes-view commit-changes-view">
       {compareFrom && (
         <div className="commit-compare-banner">
           <GitCompare size={14} className="commit-compare-banner-icon" />
-          <span className="commit-compare-banner-title">提交间对比</span>
+          <span className="commit-compare-banner-title">{t("allChanges.commitCompareBanner")}</span>
           <code title={compareFrom.hash}>{compareFrom.short_hash}</code>
           <ArrowRight size={12} className="commit-compare-banner-arrow" />
           <code title={commit.hash}>{commit.short_hash}</code>
@@ -172,10 +176,10 @@ export default function CommitChangesView({
               type="button"
               className="commit-compare-exit"
               onClick={onClearCompare}
-              title="退出提交间对比"
+              title={t("allChanges.exitCompareTooltip")}
             >
               <X size={12} />
-              <span>退出对比</span>
+              <span>{t("allChanges.exitCompare")}</span>
             </button>
           )}
         </div>
@@ -183,7 +187,7 @@ export default function CommitChangesView({
 
       <div className="commit-changes-summary">
         <div className="commit-changes-subject">
-          {commit.subject || "(no message)"}
+          {commit.subject || t("allChanges.noMessage")}
         </div>
 
         {commit.body && (
@@ -193,7 +197,7 @@ export default function CommitChangesView({
             onClick={() => setBodyExpanded((v) => !v)}
           >
             {bodyExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-            {bodyExpanded ? "收起详情" : "展开详情"}
+            {bodyExpanded ? t("allChanges.collapseDetails") : t("allChanges.expandDetails")}
           </button>
         )}
 
@@ -202,11 +206,11 @@ export default function CommitChangesView({
         )}
 
         <div className="commit-changes-meta">
-          <span className="commit-changes-meta-item" title="提交哈希">
+          <span className="commit-changes-meta-item" title={t("allChanges.commitHash")}>
             <GitCommit size={12} />
             <code>{commit.short_hash}</code>
           </span>
-          <span className="commit-changes-meta-item" title="作者">
+          <span className="commit-changes-meta-item" title={t("allChanges.author")}>
             <User size={12} />
             <span>{commit.author_name}</span>
             {commit.author_email && (
@@ -215,10 +219,10 @@ export default function CommitChangesView({
           </span>
           <span
             className="commit-changes-meta-item"
-            title={new Date(commit.date).toLocaleString()}
+            title={formatDate(commit.date)}
           >
             <Clock size={12} />
-            <span>{commit.date_relative}</span>
+            <span>{relativeDate}</span>
           </span>
           {commit.parent_count >= 2 && (
             <span className="commit-merge-badge">Merge</span>
@@ -228,10 +232,10 @@ export default function CommitChangesView({
               type="button"
               className="commit-cherry-pick-btn"
               onClick={() => onCherryPick(commit)}
-              title="把该提交的改动应用到当前分支 (git cherry-pick)"
+              title={t("allChanges.cherryPickTooltip")}
             >
               <GitCommitHorizontal size={12} />
-              <span>Cherry-pick</span>
+              <span>{t("common.cherryPick")}</span>
             </button>
           )}
         </div>
@@ -239,7 +243,7 @@ export default function CommitChangesView({
 
       <div className="all-changes-toolbar">
         <span className="all-changes-title">
-          {compareFrom ? "两个提交之间的变更" : "本次提交的变更"}
+          {compareFrom ? t("allChanges.compareChangesTitle") : t("allChanges.commitChangesTitle")}
           <span className="all-changes-count">{files.length}</span>
         </span>
 
@@ -249,10 +253,10 @@ export default function CommitChangesView({
               type="button"
               className="all-changes-tool-btn"
               onClick={toggleAllCollapse}
-              title={allCollapsed ? "展开所有文件 Diff" : "折叠所有文件 Diff"}
+              title={allCollapsed ? t("allChanges.expandAllTooltip") : t("allChanges.collapseAllTooltip")}
             >
               {allCollapsed ? <ChevronsUpDown size={13} /> : <ChevronsDownUp size={13} />}
-              <span>{allCollapsed ? "全部展开" : "全部折叠"}</span>
+              <span>{allCollapsed ? t("allChanges.expandAll") : t("allChanges.collapseAll")}</span>
             </button>
           )}
 
@@ -260,10 +264,10 @@ export default function CommitChangesView({
             type="button"
             className={`all-changes-tool-btn ${wrap ? "active" : ""}`}
             onClick={() => setWrap((w) => !w)}
-            title={wrap ? "取消自动换行" : "开启自动换行"}
+            title={wrap ? t("diff.wrapLinesOff") : t("diff.wrapLinesOn")}
           >
             <WrapText size={13} />
-            <span>换行</span>
+            <span>{t("diff.wrapLines")}</span>
           </button>
 
           <div className="diff-view-toggle">
@@ -271,17 +275,17 @@ export default function CommitChangesView({
               type="button"
               className={`diff-view-btn ${layout === "unified" ? "active" : ""}`}
               onClick={() => changeLayout("unified")}
-              title="统一视图：增删行上下排列"
+              title={t("diff.unifiedTooltip")}
             >
-              统一
+              {t("diff.unified")}
             </button>
             <button
               type="button"
               className={`diff-view-btn ${layout === "split" ? "active" : ""}`}
               onClick={() => changeLayout("split")}
-              title="双栏视图：原版本与新版本左右对比"
+              title={t("diff.splitTooltip")}
             >
-              双栏
+              {t("diff.split")}
             </button>
           </div>
         </div>
@@ -291,18 +295,18 @@ export default function CommitChangesView({
         {loading && (
           <div className="all-changes-loading">
             <Loader2 size={20} className="spin" />
-            <span>正在加载提交内容…</span>
+            <span>{t("allChanges.loadingCommit")}</span>
           </div>
         )}
 
         {!loading && loadError && (
           <div className="all-changes-loading" style={{ color: "var(--error-color)" }}>
-            获取提交内容失败：{loadError}
+            {loadError}
           </div>
         )}
 
         {!loading && !loadError && files.length === 0 && (
-          <div className="all-changes-loading">该提交没有变更文件</div>
+          <div className="all-changes-loading">{t("allChanges.commitNoFiles")}</div>
         )}
 
         {!loading &&
@@ -316,7 +320,7 @@ export default function CommitChangesView({
                 <div
                   className={`all-diff-file-header ${isCollapsed ? "collapsed" : ""}`}
                   onClick={() => toggleCollapse(file.path)}
-                  title="点击折叠 / 展开此文件 Diff"
+                  title={t("allChanges.toggleFileCollapseTooltip")}
                 >
                   <ChevronDown
                     size={14}
@@ -338,7 +342,7 @@ export default function CommitChangesView({
                     type="button"
                     className="all-diff-copy-btn"
                     onClick={(e) => handleCopyPath(e, file.path)}
-                    title={copiedKey === file.path ? "已复制！" : "复制文件路径"}
+                    title={copiedKey === file.path ? t("common.copied") : t("diff.copyFilePath")}
                   >
                     {copiedKey === file.path ? (
                       <Check size={11} style={{ color: "var(--added-color)" }} />
@@ -358,7 +362,7 @@ export default function CommitChangesView({
 
                 {!isCollapsed &&
                   (errors[file.path] ? (
-                    <div className="all-diff-error">获取 Diff 失败：{errors[file.path]}</div>
+                    <div className="all-diff-error">{t("allChanges.getDiffFailed")}{errors[file.path]}</div>
                   ) : diffs[file.path] ? (
                     <DiffBody
                       diff={diffs[file.path]}

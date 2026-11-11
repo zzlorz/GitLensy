@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight, Undo2, Plus, Minus, FileText, FileStack } from "lucide-react";
 import type { GitStatus, ChangedFile, FileStatus } from "../types";
+import { useI18n } from "../i18n";
 
 interface Props {
   status: GitStatus;
@@ -23,22 +24,24 @@ interface Props {
 }
 
 function StatusBadge({ status }: { status: FileStatus }) {
-  const badgeMap: Record<FileStatus, { text: string; className: string; label: string }> = {
-    modified: { text: "M", className: "badge-modified", label: "已修改 (Modified)" },
-    added: { text: "A", className: "badge-added", label: "新添加 (Added)" },
-    deleted: { text: "D", className: "badge-deleted", label: "已删除 (Deleted)" },
-    renamed: { text: "R", className: "badge-renamed", label: "重命名 (Renamed)" },
-    copied: { text: "C", className: "badge-renamed", label: "已复制 (Copied)" },
-    conflict: { text: "!", className: "badge-conflict", label: "存在冲突 (Conflict)" },
-    untracked: { text: "U", className: "badge-untracked", label: "未跟踪 (Untracked)" },
-    ignored: { text: "I", className: "badge-modified", label: "已忽略 (Ignored)" },
-    unchanged: { text: "•", className: "badge-modified", label: "未变更 (Unchanged)" },
+  const { t } = useI18n();
+  const badgeMap: Record<FileStatus, { text: string; className: string }> = {
+    modified: { text: "M", className: "badge-modified" },
+    added: { text: "A", className: "badge-added" },
+    deleted: { text: "D", className: "badge-deleted" },
+    renamed: { text: "R", className: "badge-renamed" },
+    copied: { text: "C", className: "badge-renamed" },
+    conflict: { text: "!", className: "badge-conflict" },
+    untracked: { text: "U", className: "badge-untracked" },
+    ignored: { text: "I", className: "badge-modified" },
+    unchanged: { text: "•", className: "badge-modified" },
   };
 
-  const info = badgeMap[status] || { text: "M", className: "badge-modified", label: status };
+  const info = badgeMap[status] || { text: "M", className: "badge-modified" };
+  const label = t(`statusLabels.${status}`) || status;
 
   return (
-    <span className={`file-badge ${info.className}`} title={info.label}>
+    <span className={`file-badge ${info.className}`} title={label}>
       {info.text}
     </span>
   );
@@ -63,6 +66,7 @@ function FileItem({
   onUnstage: (file: ChangedFile) => void;
   onPreview: (file: ChangedFile) => void;
 }) {
+  const { t } = useI18n();
   const displayStatus = file.staged_status || file.unstaged_status || "modified";
   const isDeleted = file.staged_status === "deleted" || file.unstaged_status === "deleted";
   const normalizedPath = file.path.replace(/\\/g, "/");
@@ -101,7 +105,7 @@ function FileItem({
           <button
             type="button"
             className="file-action-btn"
-            title="打开文件预览 (Open File)"
+            title={t("fileList.openFilePreview")}
             onClick={(e) => handleAction(e, () => onPreview(file))}
           >
             <FileText size={13} />
@@ -112,7 +116,7 @@ function FileItem({
             <button
               type="button"
               className="file-action-btn danger"
-              title="放弃工作区修改 (Discard Changes)"
+              title={t("fileList.discardFile")}
               onClick={(e) => handleAction(e, () => onRevert(file, "unstaged"))}
             >
               <Undo2 size={13} />
@@ -120,7 +124,7 @@ function FileItem({
             <button
               type="button"
               className="file-action-btn"
-              title="暂存此文件 (Stage Changes)"
+              title={t("fileList.stageFile")}
               onClick={(e) => handleAction(e, () => onStage(file))}
             >
               <Plus size={13} />
@@ -130,7 +134,7 @@ function FileItem({
           <button
             type="button"
             className="file-action-btn"
-            title="取消暂存 (Unstage Changes)"
+            title={t("fileList.unstageFile")}
             onClick={(e) => handleAction(e, () => onUnstage(file))}
           >
             <Minus size={13} />
@@ -169,6 +173,7 @@ function FileSection({
   defaultCollapsed?: boolean;
   grow?: boolean;
 }) {
+  const { t } = useI18n();
   const [collapsed, setCollapsed] = useState(defaultCollapsed);
 
   return (
@@ -192,7 +197,7 @@ function FileSection({
         <div className="file-list">
           {files.length === 0 ? (
             <div style={{ padding: "16px 12px", color: "var(--text-muted)", fontSize: "12px", textAlign: "center" }}>
-              无变更文件
+              {t("fileList.noChangedFiles")}
             </div>
           ) : (
             files.map((file) => (
@@ -227,10 +232,12 @@ export default function FileList({
   onStageAll,
   onDiscardAll,
 }: Props) {
+  const { t } = useI18n();
+
   return (
     <div className="file-list-container">
       <FileSection
-        title="工作区变更 (Unstaged)"
+        title={t("fileList.unstagedSection")}
         files={status.unstaged}
         selectedPath={selectedPath}
         onSelect={onSelect}
@@ -243,7 +250,7 @@ export default function FileList({
             <button
               type="button"
               className="file-action-btn"
-              title="打开所有变更对比 (Open Changes)"
+              title={t("fileList.openAllChanges")}
               onClick={onOpenAllChanges}
             >
               <FileStack size={13} />
@@ -251,7 +258,7 @@ export default function FileList({
             <button
               type="button"
               className="file-action-btn danger"
-              title="放弃所有工作区修改 (Discard All Changes)"
+              title={t("fileList.discardAllTooltip")}
               onClick={onDiscardAll}
             >
               <Undo2 size={13} />
@@ -259,7 +266,7 @@ export default function FileList({
             <button
               type="button"
               className="file-action-btn"
-              title="暂存所有变更 (Stage All Changes)"
+              title={t("fileList.stageAllTooltip")}
               onClick={onStageAll}
             >
               <Plus size={13} />
@@ -271,7 +278,7 @@ export default function FileList({
       />
 
       <FileSection
-        title="暂存区变更 (Staged)"
+        title={t("fileList.stagedSection")}
         files={status.staged}
         selectedPath={selectedPath}
         onSelect={onSelect}

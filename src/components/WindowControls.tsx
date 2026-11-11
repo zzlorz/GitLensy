@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Copy, Minus, Square, X } from "lucide-react";
+import { useI18n } from "../i18n";
 
 /** 无边框窗口的边缘缩放热区 */
 const RESIZE_HANDLES: {
@@ -19,6 +20,7 @@ const RESIZE_HANDLES: {
 
 /** 放在工具栏最右侧的窗口控制按钮 */
 export function WindowControls() {
+  const { t } = useI18n();
   const [maximized, setMaximized] = useState(false);
   const appWindow = getCurrentWindow();
 
@@ -51,7 +53,7 @@ export function WindowControls() {
       <button
         type="button"
         className="window-btn"
-        title="最小化"
+        title={t("windowControls.minimize")}
         onClick={() => appWindow.minimize().catch(() => {})}
       >
         <Minus size={14} />
@@ -59,7 +61,7 @@ export function WindowControls() {
       <button
         type="button"
         className="window-btn"
-        title={maximized ? "还原" : "最大化"}
+        title={maximized ? t("windowControls.restore") : t("windowControls.maximize")}
         onClick={toggleMaximize}
       >
         {maximized ? <Copy size={13} /> : <Square size={12} />}
@@ -67,7 +69,7 @@ export function WindowControls() {
       <button
         type="button"
         className="window-btn window-btn-close"
-        title="关闭"
+        title={t("windowControls.close")}
         onClick={() => appWindow.close().catch(() => {})}
       >
         <X size={15} />

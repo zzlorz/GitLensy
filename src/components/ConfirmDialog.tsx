@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { AlertTriangle } from "lucide-react";
+import { useI18n } from "../i18n";
 
 interface Props {
   title: string;
@@ -13,12 +14,16 @@ interface Props {
 export default function ConfirmDialog({
   title,
   message,
-  confirmText = "确认",
-  cancelText = "取消",
+  confirmText,
+  cancelText,
   onConfirm,
   onCancel,
 }: Props) {
+  const { t } = useI18n();
   const cancelBtnRef = useRef<HTMLButtonElement>(null);
+
+  const effectiveConfirm = confirmText ?? t("common.confirm");
+  const effectiveCancel = cancelText ?? t("common.cancel");
 
   // 默认聚焦到取消按钮，防止 Enter 误触
   useEffect(() => {
@@ -50,10 +55,10 @@ export default function ConfirmDialog({
         <div className="confirm-body">{message}</div>
         <div className="confirm-actions">
           <button ref={cancelBtnRef} className="confirm-btn confirm-btn-cancel" onClick={onCancel}>
-            {cancelText}
+            {effectiveCancel}
           </button>
           <button className="confirm-btn confirm-btn-danger" onClick={onConfirm}>
-            {confirmText}
+            {effectiveConfirm}
           </button>
         </div>
       </div>

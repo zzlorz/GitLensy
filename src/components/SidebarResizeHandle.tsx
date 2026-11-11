@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useI18n } from "../i18n";
 
 interface Props {
   /** 当前宽度（px） */
@@ -34,8 +35,10 @@ export default function SidebarResizeHandle({
   onResizeEnd,
   onReset,
   showLine = true,
-  title = "拖拽调整宽度，双击恢复默认",
+  title: customTitle,
 }: Props) {
+  const { t } = useI18n();
+  const title = customTitle ?? t("projectSidebar.resizeDefaultTooltip");
   const dragRef = useRef<{ startX: number; startWidth: number; latest: number } | null>(null);
   const [dragging, setDragging] = useState(false);
 

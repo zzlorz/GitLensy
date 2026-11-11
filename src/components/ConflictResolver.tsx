@@ -10,6 +10,7 @@ import {
   Save,
 } from "lucide-react";
 import { getConflictFile, markConflictResolved, resolveConflict } from "../api/tauri";
+import { useI18n } from "../i18n";
 
 /** 一个冲突块（一对 <<<<<<< / ======= / >>>>>>> 之间的内容） */
 interface ConflictBlock {
@@ -32,7 +33,7 @@ type Piece = TextPiece | ConflictBlock;
 export type ConflictChoice = "ours" | "theirs" | "both" | "none";
 
 /** 解析文件内容中的冲突标记，普通文本与冲突块按原顺序保存 */
-function parseConflicts(content: string): { pieces: Piece[]; count: number } {
+function parseConflicts(content: string, defaultOurs: string, defaultTheirs: string): { pieces: Piece[]; count: number } {
   const lines = content.split(/\r?\n/);
   const pieces: Piece[] = [];
   let textBuffer: string[] = [];
@@ -118,8 +119,8 @@ function parseConflicts(content: string): { pieces: Piece[]; count: number } {
       ours,
       theirs,
       base,
-      oursLabel: line.slice(7).trim() || "当前分支",
-      theirsLabel: theirsMarker.slice(7).trim() || "传入分支",
+      oursLabel: line.slice(7).trim() || defaultOurs,
+      theirsLabel: theirsMarker.slice(7).trim() || defaultTheirs,
     });
     id += 1;
     i = j;
@@ -152,6 +153,7 @@ interface Props {
 
 /** 合并冲突可视化解决：逐块选择保留当前 / 传入 / 两者，最后写回并 git add */
 export default function ConflictResolver({ filePath, onResolved }: Props) {
+  const { t } = useI18n();
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -159,6 +161,9 @@ export default function ConflictResolver({ filePath, onResolved }: Props) {
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
   const [saving, setSaving] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+
+  const defaultOurs = t("conflict.currentBranchDefault");
+  const defaultTheirs = t("conflict.incomingBranchDefault");
 
   useEffect(() => {
     let cancelled = false;
@@ -173,7 +178,7 @@ export default function ConflictResolver({ filePath, onResolved }: Props) {
       .then((text) => {
         if (cancelled) return;
         setContent(text);
-        const { pieces, count } = parseConflicts(text);
+        const { pieces, count } = parseConflicts(text, defaultOurs, defaultTheirs);
         const initial: Record<number, ConflictChoice> = {};
         for (const piece of pieces) {
           if (piece.kind === "conflict") initial[piece.id] = "ours";
@@ -191,11 +196,11 @@ export default function ConflictResolver({ filePath, onResolved }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [filePath]);
+  }, [filePath, defaultOurs, defaultTheirs]);
 
   const parsed = useMemo(
-    () => (content !== null ? parseConflicts(content) : { pieces: [], count: 0 }),
-    [content],
+    () => (content !== null ? parseConflicts(content, defaultOurs, defaultTheirs) : { pieces: [], count: 0 }),
+    [content, defaultOurs, defaultTheirs],
   );
 
   const resolvedContent = useMemo(() => {
@@ -260,7 +265,7 @@ export default function ConflictResolver({ filePath, onResolved }: Props) {
         <div className="conflict-header-main">
           <FileWarning size={16} className="conflict-header-icon" />
           <div className="conflict-header-text">
-            <div className="conflict-title">解决合并冲突</div>
+            <div className="conflict-title">{t("conflict.title")}</div>
             <div className="conflict-path" title={filePath}>
               {filePath}
             </div>
@@ -271,7 +276,7 @@ export default function ConflictResolver({ filePath, onResolved }: Props) {
                 parsed.count > 0 ? "has-conflicts" : "no-conflicts"
               }`}
             >
-              {parsed.count > 0 ? `${parsed.count} 处冲突` : "无冲突标记"}
+              {parsed.count > 0 ? t("conflict.conflictsCount", { count: parsed.count }) : t("conflict.noMarkers")}
             </span>
           )}
         </div>
@@ -284,18 +289,18 @@ export default function ConflictResolver({ filePath, onResolved }: Props) {
                 className="conflict-quick-btn"
                 onClick={() => setAll("ours")}
                 disabled={saving}
-                title="所有冲突块都保留当前分支内容"
+                title={t("conflict.keepAllOursTooltip")}
               >
-                全部保留当前
+                {t("conflict.keepAllOurs")}
               </button>
               <button
                 type="button"
                 className="conflict-quick-btn"
                 onClick={() => setAll("theirs")}
                 disabled={saving}
-                title="所有冲突块都保留传入分支内容"
+                title={t("conflict.keepAllTheirsTooltip")}
               >
-                全部保留传入
+                {t("conflict.keepAllTheirs")}
               </button>
             </>
           )}
@@ -304,20 +309,20 @@ export default function ConflictResolver({ filePath, onResolved }: Props) {
             className="conflict-save-btn"
             onClick={handleSave}
             disabled={saving || loading || loadError !== null || content === null}
-            title="写入解决后的内容并标记为已解决 (git add)"
+            title={t("conflict.saveAndMarkTooltip")}
           >
             {saving ? <Loader2 size={13} className="spin" /> : <Save size={13} />}
-            <span>{saving ? "处理中..." : "保存并标记已解决"}</span>
+            <span>{saving ? t("common.processing") : t("conflict.saveAndMark")}</span>
           </button>
           <button
             type="button"
             className="conflict-mark-btn"
             onClick={handleMarkResolved}
             disabled={saving}
-            title="不修改文件内容，直接标记为已解决 (git add)"
+            title={t("conflict.markOnlyTooltip")}
           >
             <CheckCircle2 size={13} />
-            <span>仅标记已解决</span>
+            <span>{t("conflict.markOnly")}</span>
           </button>
         </div>
       </div>
@@ -325,14 +330,14 @@ export default function ConflictResolver({ filePath, onResolved }: Props) {
       {loading && (
         <div className="conflict-loading">
           <Loader2 size={18} className="spin" />
-          <span>正在读取冲突文件…</span>
+          <span>{t("conflict.readingConflictFile")}</span>
         </div>
       )}
 
       {!loading && loadError && (
         <div className="conflict-load-error">
           <AlertTriangle size={16} />
-          <span>无法读取冲突文件：{loadError}</span>
+          <span>{t("conflict.readError")}{loadError}</span>
         </div>
       )}
 
@@ -340,9 +345,9 @@ export default function ConflictResolver({ filePath, onResolved }: Props) {
         <div className="conflict-no-markers">
           <CheckCircle2 size={18} />
           <div>
-            <div>未检测到冲突标记。</div>
+            <div>{t("conflict.noConflictFound")}</div>
             <div className="conflict-no-markers-sub">
-              如果已在外部编辑器解决冲突，可以直接点击「仅标记已解决」。
+              {t("conflict.noConflictFoundSub")}
             </div>
           </div>
         </div>
@@ -359,29 +364,29 @@ export default function ConflictResolver({ filePath, onResolved }: Props) {
               <section className="conflict-block" key={piece.id}>
                 <div className="conflict-block-header">
                   <span className="conflict-block-index">
-                    冲突 {index + 1} / {parsed.count}
+                    {t("conflict.conflictBlockHeader", { index: index + 1, total: parsed.count })}
                   </span>
                   <span className="conflict-block-labels">
                     <span className="conflict-label ours" title={piece.oursLabel}>
-                      当前 · {piece.oursLabel}
+                      {t("conflict.currentOurs", { label: piece.oursLabel })}
                     </span>
                     <span className="conflict-label theirs" title={piece.theirsLabel}>
-                      传入 · {piece.theirsLabel}
+                      {t("conflict.incomingTheirs", { label: piece.theirsLabel })}
                     </span>
                   </span>
                 </div>
 
                 <div className="conflict-sides">
                   <div className="conflict-side ours">
-                    <div className="conflict-side-header">当前分支 (ours)</div>
+                    <div className="conflict-side-header">{t("conflict.currentBranchSide")}</div>
                     <pre className="conflict-side-content">
-                      {piece.ours.length > 0 ? piece.ours.join("\n") : "（无内容）"}
+                      {piece.ours.length > 0 ? piece.ours.join("\n") : t("conflict.noContent")}
                     </pre>
                   </div>
                   <div className="conflict-side theirs">
-                    <div className="conflict-side-header">传入分支 (theirs)</div>
+                    <div className="conflict-side-header">{t("conflict.incomingBranchSide")}</div>
                     <pre className="conflict-side-content">
-                      {piece.theirs.length > 0 ? piece.theirs.join("\n") : "（无内容）"}
+                      {piece.theirs.length > 0 ? piece.theirs.join("\n") : t("conflict.noContent")}
                     </pre>
                   </div>
                 </div>
@@ -389,10 +394,10 @@ export default function ConflictResolver({ filePath, onResolved }: Props) {
                 <div className="conflict-choice-row">
                   {(
                     [
-                      ["ours", "保留当前"],
-                      ["theirs", "保留传入"],
-                      ["both", "两者都保留"],
-                      ["none", "全部删除"],
+                      ["ours", t("conflict.keepOurs")],
+                      ["theirs", t("conflict.keepTheirs")],
+                      ["both", t("conflict.keepBoth")],
+                      ["none", t("conflict.keepNone")],
                     ] as [ConflictChoice, string][]
                   ).map(([value, label]) => (
                     <button
@@ -414,7 +419,7 @@ export default function ConflictResolver({ filePath, onResolved }: Props) {
                     onClick={() => toggleExpanded(piece.id)}
                   >
                     {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                    {open ? "收起结果" : "预览结果"}
+                    {open ? t("conflict.collapseResult") : t("conflict.previewResult")}
                   </button>
                 </div>
 
@@ -422,7 +427,7 @@ export default function ConflictResolver({ filePath, onResolved }: Props) {
                   <pre className="conflict-result-preview">
                     {result.length > 0
                       ? result.join("\n")
-                      : "（该冲突块将不保留任何内容）"}
+                      : t("conflict.emptyResult")}
                   </pre>
                 )}
               </section>
