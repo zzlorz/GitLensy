@@ -44,6 +44,8 @@ interface Props {
   onCreateBranch?: (commit: CommitInfo) => void;
   /** 为此提交新建标签 */
   onCreateTag?: (commit: CommitInfo) => void;
+  /** 每个 commit 对应的标签名列表 */
+  tagsByCommit?: Record<string, string[]>;
 }
 
 /** 每一行提交固定的高度，用于绘制拓扑图的坐标计算 */
@@ -151,6 +153,7 @@ function CommitItem({
   graphWidth,
   selected,
   compareBase,
+  tags,
   onClick,
   onToggleCompareBase,
   onContextMenu,
@@ -160,6 +163,7 @@ function CommitItem({
   graphWidth: number;
   selected: boolean;
   compareBase: boolean;
+  tags?: string[];
   onClick: () => void;
   onToggleCompareBase: (commit: CommitInfo) => void;
   onContextMenu: (e: React.MouseEvent, commit: CommitInfo) => void;
@@ -252,7 +256,25 @@ function CommitItem({
 
       <div className="commit-item-content">
         <div className="commit-subject" title={commit.subject}>
-          {commit.subject || t("allChanges.noMessage")}
+          {tags && tags.length > 0 && (
+            <span className="commit-tags-group" style={{ display: "inline-flex", gap: 4, flexShrink: 0 }}>
+              {tags.map((tagName) => (
+                <span
+                  key={tagName}
+                  className="commit-tag-pill"
+                  title={`Tag: ${tagName}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    navigator.clipboard?.writeText(tagName);
+                  }}
+                >
+                  <Tag size={10} style={{ flexShrink: 0 }} />
+                  <span>{tagName}</span>
+                </span>
+              ))}
+            </span>
+          )}
+          <span className="commit-subject-text">{commit.subject || t("allChanges.noMessage")}</span>
         </div>
         <div className="commit-meta">
           <span
@@ -308,6 +330,7 @@ export default function CommitList({
   onCheckout,
   onCreateBranch,
   onCreateTag,
+  tagsByCommit,
 }: Props) {
   const { t } = useI18n();
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -532,6 +555,7 @@ export default function CommitList({
           graphWidth={graphWidth}
           selected={selectedHash === commit.hash}
           compareBase={compareBaseHash === commit.hash}
+          tags={tagsByCommit?.[commit.hash]}
           onClick={() => onSelect(commit)}
           onToggleCompareBase={onToggleCompareBase ?? (() => {})}
           onContextMenu={handleContextMenu}

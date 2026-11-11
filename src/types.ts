@@ -23,6 +23,16 @@ export interface StashEntry {
   date: string;
 }
 
+/** 一条标签记录 */
+export interface TagEntry {
+  name: string;
+  commit_hash: string;
+  short_hash: string;
+  is_annotated: boolean;
+  message: string;
+  date: string;
+}
+
 /** 本地 / 远程分支列表 */
 export interface BranchList {
   current: string;

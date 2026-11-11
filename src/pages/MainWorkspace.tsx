@@ -17,8 +17,8 @@ import SidebarResizeHandle from "../components/SidebarResizeHandle";
 import FilePreview from "../components/FilePreview";
 import ProjectSidebar from "../components/ProjectSidebar";
 import { WindowControls, WindowResizeHandles } from "../components/WindowControls";
-import type { RepositoryInfo, GitStatus, ChangedFile, DiffView, FileDiff, CommitInfo, RecentRepo, SyncStatus, StashEntry, BranchList, OperationState } from "../types";
-import { getStatus, getFileDiff, saveCurrentRepo, getCommitLog, openTerminal, revertFile, stageFile, stageAll, discardAllUnstaged, commitChanges, getSyncStatus, syncChanges, pullChanges, fetchChanges, pushChanges, createBranch, createTag, stashChanges, getStashList, popStash, applyStash, dropStash, clearStashes, getBranches, checkoutBranch, openPath, getRecentRepos, openRepository, removeRecentRepo, deleteBranch, renameBranch, mergeBranch, rebaseBranch, cherryPickCommit, amendCommit, undoLastCommit, getOperationState, continueRebase, abortRebase, continueCherryPick, abortCherryPick } from "../api/tauri";
+import type { RepositoryInfo, GitStatus, ChangedFile, DiffView, FileDiff, CommitInfo, RecentRepo, SyncStatus, StashEntry, TagEntry, BranchList, OperationState } from "../types";
+import { getStatus, getFileDiff, saveCurrentRepo, getCommitLog, openTerminal, revertFile, stageFile, stageAll, discardAllUnstaged, commitChanges, getSyncStatus, syncChanges, pullChanges, fetchChanges, pushChanges, createBranch, createTag, getTags, deleteTag, pushTag, stashChanges, getStashList, popStash, applyStash, dropStash, clearStashes, getBranches, checkoutBranch, openPath, getRecentRepos, openRepository, removeRecentRepo, deleteBranch, renameBranch, mergeBranch, rebaseBranch, cherryPickCommit, amendCommit, undoLastCommit, getOperationState, continueRebase, abortRebase, continueCherryPick, abortCherryPick } from "../api/tauri";
 import type { OpenMethod } from "../api/tauri";
 import { useI18n } from "../i18n";
 
@@ -150,7 +150,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
   const [remoteBusy, setRemoteBusy] = useState<"pull" | "fetch" | "push" | null>(null);
   /** 更多操作菜单与输入弹窗 */
   const [toolMenuOpen, setToolMenuOpen] = useState(false);
-  const [toolAction, setToolAction] = useState<"branch" | "tag" | "stash" | "stashes" | null>(null);
+  const [toolAction, setToolAction] = useState<"branch" | "tag" | "stash" | "stashes" | "tags" | null>(null);
   const [toolInput, setToolInput] = useState("");
   const [toolBusy, setToolBusy] = useState(false);
   const [toolError, setToolError] = useState<string | null>(null);
@@ -158,6 +158,16 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
   const [stashes, setStashes] = useState<StashEntry[]>([]);
   /** 贮藏删除的二次确认 */
   const [stashConfirm, setStashConfirm] = useState<{ type: "drop"; index: number } | { type: "clear" } | null>(null);
+  /** 标签列表弹窗的数据 */
+  const [tags, setTags] = useState<TagEntry[]>([]);
+  /** 标签删除的二次确认 */
+  const [tagConfirm, setTagConfirm] = useState<{ name: string } | null>(null);
+  /** 标签推送进行中状态 */
+  const [tagPushBusy, setTagPushBusy] = useState<string | null>(null);
+  /** 新建标签附注说明 */
+  const [toolTagMessage, setToolTagMessage] = useState("");
+  /** 新建标签目标提交（右键菜单触发） */
+  const [toolTagCommit, setToolTagCommit] = useState<string | null>(null);
   /** 分支切换下拉 */
   const [branches, setBranches] = useState<BranchList | null>(null);
   const [branchMenuOpen, setBranchMenuOpen] = useState(false);
@@ -280,6 +290,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
 
     // 重新加载变更列表
     loadStatus();
+    getTags().then(setTags).catch(() => setTags([]));
 
     // 如果当前在历史 tab，重新加载提交记录
     if (activeTab === "history") {
@@ -667,6 +678,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
       // 同步刷新选中提交（保持选中，即使提交信息已变化）
       setSelectedCommit((prev) => (prev ? page.find((c) => c.hash === prev.hash) ?? prev : prev));
       setCompareFrom((prev) => (prev ? page.find((c) => c.hash === prev.hash) ?? prev : prev));
+      getTags().then(setTags).catch(() => {});
     } catch (e) {
       setLogError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -726,11 +738,26 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
     return () => document.removeEventListener("mousedown", handler);
   }, [toolMenuOpen]);
 
-  const openToolDialog = useCallback((action: "branch" | "tag" | "stash" | "stashes") => {
+  /** commitHash -> tag names 映射，用于提交列表显示 tag 标签 */
+  const tagsByCommit = useMemo<Record<string, string[]>>(() => {
+    if (tags.length === 0) return {};
+    const map: Record<string, string[]> = {};
+    for (const tag of tags) {
+      if (!map[tag.commit_hash]) map[tag.commit_hash] = [];
+      map[tag.commit_hash].push(tag.name);
+    }
+    return map;
+  }, [tags]);
+
+  const openToolDialog = useCallback((action: "branch" | "tag" | "stash" | "stashes" | "tags") => {
     setToolMenuOpen(false);
     setToolAction(action);
     setToolInput("");
     setToolError(null);
+    setToolTagMessage("");
+    if (action !== "tag") {
+      setToolTagCommit(null);
+    }
 
     // 贮藏列表：打开时即时拉取
     if (action === "stashes") {
@@ -740,8 +767,78 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
         .then((entries) => setStashes(entries))
         .catch((e) => setToolError(e instanceof Error ? e.message : String(e)))
         .finally(() => setToolBusy(false));
+    } else if (action === "tags") {
+      setTags([]);
+      setToolBusy(true);
+      getTags()
+        .then((entries) => setTags(entries))
+        .catch((e) => setToolError(e instanceof Error ? e.message : String(e)))
+        .finally(() => setToolBusy(false));
     }
   }, []);
+
+  /** 基于选中的提交创建标签（右键菜单触发） */
+  const handleCreateTagFromCommit = useCallback((commit: CommitInfo) => {
+    setToolTagCommit(commit.hash);
+    setToolTagMessage("");
+    setToolInput("");
+    setToolError(null);
+    setToolAction("tag");
+  }, []);
+
+  /** 检出标签（切换到该 tag） */
+  const handleCheckoutTag = useCallback(
+    async (tagName: string) => {
+      setToolAction(null);
+      setBranchBusy(true);
+      setError(null);
+      try {
+        await checkoutBranch(tagName, false);
+        const info = await openRepository(repo.path);
+        saveCurrentRepo(info);
+        onRepoUpdate(info);
+        await loadStatus();
+        await refreshHistory();
+        setFolderRefreshKey((k) => k + 1);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBranchBusy(false);
+      }
+    },
+    [repo.path, onRepoUpdate, loadStatus, refreshHistory]
+  );
+
+  /** 删除本地标签（二次确认后） */
+  const handleTagDelete = useCallback(async () => {
+    if (!tagConfirm || toolBusy) return;
+    setToolBusy(true);
+    setToolError(null);
+    try {
+      await deleteTag(tagConfirm.name);
+      setTagConfirm(null);
+      setTags(await getTags());
+    } catch (e) {
+      setTagConfirm(null);
+      setToolError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setToolBusy(false);
+    }
+  }, [tagConfirm, toolBusy]);
+
+  /** 推送标签到远程仓库 */
+  const handleTagPush = useCallback(async (tagName: string) => {
+    if (tagPushBusy) return;
+    setTagPushBusy(tagName);
+    setToolError(null);
+    try {
+      await pushTag(tagName);
+    } catch (e) {
+      setToolError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTagPushBusy(null);
+    }
+  }, [tagPushBusy]);
 
   /** 应用 / 恢复贮藏：keepRecord 为 true 时用 apply（保留记录），否则用 pop（成功后删除） */
   const handleApplyStash = useCallback(
@@ -1092,7 +1189,10 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
         await refreshHistory();
         setFolderRefreshKey((k) => k + 1);
       } else if (toolAction === "tag") {
-        await createTag(value);
+        await createTag(value, toolTagMessage.trim() || undefined, toolTagCommit || undefined);
+        setToolTagCommit(null);
+        setToolTagMessage("");
+        getTags().then(setTags).catch(() => {});
       } else if (toolAction === "stash") {
         await stashChanges(value || undefined);
         setSelectedFile(null);
@@ -1107,7 +1207,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
     } finally {
       setToolBusy(false);
     }
-  }, [toolAction, toolBusy, toolInput, repo.path, onRepoUpdate, loadStatus, refreshHistory, t]);
+  }, [toolAction, toolBusy, toolInput, toolTagMessage, toolTagCommit, repo.path, onRepoUpdate, loadStatus, refreshHistory, t]);
 
   /** 提交暂存区内容；Amend 模式下修正上一次提交 */
   const handleCommit = useCallback(async () => {
@@ -1557,6 +1657,16 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                   type="button"
                   className="toolbar-menu-item"
                   role="menuitem"
+                  title={t("toolbar.tagList")}
+                  onClick={() => openToolDialog("tags")}
+                >
+                  <Tag size={13} />
+                  <span>{t("toolbar.tagList")}</span>
+                </button>
+                <button
+                  type="button"
+                  className="toolbar-menu-item"
+                  role="menuitem"
                   disabled={changesCount === 0}
                   title={changesCount === 0 ? t("toolbar.noStashableChanges") : t("toolbar.stashChanges")}
                   onClick={() => openToolDialog("stash")}
@@ -1798,7 +1908,8 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
             onCherryPick={setCherryPickTarget}
             onCheckout={handleCheckoutCommit}
             onCreateBranch={() => openToolDialog("branch")}
-            onCreateTag={() => openToolDialog("tag")}
+            onCreateTag={handleCreateTagFromCommit}
+            tagsByCommit={tagsByCommit}
             uncommittedContent={
               status ? (
                 <FileList
@@ -2198,7 +2309,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
             <div className="confirm-header">
               {toolAction === "branch" ? (
                 <GitBranch size={16} className="confirm-icon" style={{ color: "var(--accent-color)" }} />
-              ) : toolAction === "tag" ? (
+              ) : toolAction === "tag" || toolAction === "tags" ? (
                 <Tag size={16} className="confirm-icon" style={{ color: "var(--accent-color)" }} />
               ) : toolAction === "stash" ? (
                 <Archive size={16} className="confirm-icon" style={{ color: "var(--accent-color)" }} />
@@ -2212,7 +2323,9 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                     ? t("dialogs.newTagDialogTitle")
                     : toolAction === "stash"
                       ? t("dialogs.stashDialogTitle")
-                      : t("dialogs.stashesDialogTitle")}
+                      : toolAction === "tags"
+                        ? t("dialogs.tagsDialogTitle")
+                        : t("dialogs.stashesDialogTitle")}
               </span>
             </div>
             {toolAction === "stashes" ? (
@@ -2272,13 +2385,107 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                 )}
                 {toolError && <div className="dialog-error">{toolError}</div>}
               </div>
+            ) : toolAction === "tags" ? (
+              <div className="confirm-body">
+                <div className="dialog-hint">
+                  {t("dialogs.tagsHint")}
+                </div>
+                {toolBusy && tags.length === 0 ? (
+                  <div className="stash-empty">
+                    <Loader2 size={14} className="spin" /> {t("dialogs.loadingTags")}
+                  </div>
+                ) : tags.length === 0 ? (
+                  <div className="stash-empty">{t("dialogs.noTagEntries")}</div>
+                ) : (
+                  <div className="stash-list">
+                    {tags.map((tag) => (
+                      <div className="stash-item" key={tag.name}>
+                        <div className="stash-item-info">
+                          <div className="stash-item-message" style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                            <span style={{ fontWeight: 600 }}>{tag.name}</span>
+                            <span
+                              style={{
+                                fontSize: 10,
+                                padding: "1px 5px",
+                                borderRadius: 3,
+                                fontWeight: 500,
+                                backgroundColor: tag.is_annotated ? "rgba(79, 156, 247, 0.15)" : "var(--bg-hover)",
+                                color: tag.is_annotated ? "#4f9cf7" : "var(--text-muted)",
+                                border: `1px solid ${tag.is_annotated ? "rgba(79, 156, 247, 0.3)" : "var(--border-color)"}`,
+                              }}
+                            >
+                              {tag.is_annotated ? t("dialogs.annotatedBadge") : t("dialogs.lightweightBadge")}
+                            </span>
+                            {tag.message && (
+                              <span style={{ color: "var(--text-muted)", fontSize: 11, fontStyle: "italic" }}>
+                                {tag.message}
+                              </span>
+                            )}
+                          </div>
+                          <div className="stash-item-meta">
+                            <span
+                              className="commit-hash"
+                              title={tag.commit_hash}
+                              onClick={() => navigator.clipboard?.writeText(tag.commit_hash)}
+                            >
+                              {tag.short_hash}
+                            </span>
+                            {tag.date && ` · ${tag.date}`}
+                          </div>
+                        </div>
+                        <div className="stash-item-actions">
+                          <button
+                            type="button"
+                            className="stash-action-btn"
+                            title={t("dialogs.copyTagNameTooltip")}
+                            onClick={() => navigator.clipboard?.writeText(tag.name)}
+                          >
+                            <Copy size={11} />
+                          </button>
+                          <button
+                            type="button"
+                            className="stash-action-btn primary"
+                            title={t("dialogs.checkoutTagTooltip")}
+                            onClick={() => handleCheckoutTag(tag.name)}
+                          >
+                            <GitCommit size={11} />
+                            <span>{t("commitList.checkoutCommit") ? t("commitList.checkoutCommit").replace(/\s*\(.*\)/, "") : "检出"}</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="stash-action-btn"
+                            disabled={tagPushBusy === tag.name}
+                            title={t("dialogs.pushTagTooltip")}
+                            onClick={() => handleTagPush(tag.name)}
+                          >
+                            {tagPushBusy === tag.name ? (
+                              <Loader2 size={11} className="spin" />
+                            ) : (
+                              <Upload size={11} />
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            className="stash-action-btn danger"
+                            title={t("dialogs.deleteTagTooltip")}
+                            onClick={() => setTagConfirm({ name: tag.name })}
+                          >
+                            <Trash2 size={11} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {toolError && <div className="dialog-error">{toolError}</div>}
+              </div>
             ) : (
               <div className="confirm-body">
                 <div className="dialog-hint">
                   {toolAction === "branch"
                     ? t("dialogs.newBranchHint")
                     : toolAction === "tag"
-                      ? t("dialogs.newTagHint")
+                      ? (toolTagCommit ? t("dialogs.newTagCommitHint", { hash: toolTagCommit.slice(0, 7) }) : t("dialogs.newTagHintWithMsg"))
                       : t("dialogs.stashHint")}
                 </div>
                 <input
@@ -2296,10 +2503,25 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                   }
                   onChange={(e) => setToolInput(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") handleToolSubmit();
+                    if (e.key === "Enter" && toolAction !== "tag") handleToolSubmit();
                     if (e.key === "Escape") closeToolDialog();
                   }}
                 />
+                {toolAction === "tag" && (
+                  <input
+                    className="dialog-input"
+                    type="text"
+                    value={toolTagMessage}
+                    spellCheck={false}
+                    placeholder={t("dialogs.newTagMsgPlaceholder")}
+                    onChange={(e) => setToolTagMessage(e.target.value)}
+                    style={{ marginTop: 8 }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleToolSubmit();
+                      if (e.key === "Escape") closeToolDialog();
+                    }}
+                  />
+                )}
                 {toolError && <div className="dialog-error">{toolError}</div>}
               </div>
             )}
@@ -2314,9 +2536,9 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                 </button>
               )}
               <button className="confirm-btn confirm-btn-cancel" onClick={closeToolDialog} disabled={toolBusy}>
-                {toolAction === "stashes" ? t("common.close") : t("common.cancel")}
+                {toolAction === "stashes" || toolAction === "tags" ? t("common.close") : t("common.cancel")}
               </button>
-              {toolAction !== "stashes" && (
+              {toolAction !== "stashes" && toolAction !== "tags" && (
                 <button
                   className="confirm-btn confirm-btn-primary"
                   onClick={handleToolSubmit}
@@ -2376,6 +2598,16 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
           cancelText={t("common.cancel")}
           onConfirm={handleStashDelete}
           onCancel={() => setStashConfirm(null)}
+        />
+      )}
+      {tagConfirm && (
+        <ConfirmDialog
+          title={t("dialogs.deleteTagTitle")}
+          message={t("dialogs.deleteTagMsg", { name: tagConfirm.name })}
+          confirmText={t("dialogs.deleteTagBtn")}
+          cancelText={t("common.cancel")}
+          onConfirm={handleTagDelete}
+          onCancel={() => setTagConfirm(null)}
         />
       )}
 

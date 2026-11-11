@@ -188,3 +188,19 @@ pub struct OperationState {
     /// "rebase" | "cherry-pick" | "none"
     pub kind: String,
 }
+
+/// 一条标签记录
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagEntry {
+    pub name: String,
+    /// 标签指向的提交哈希（已经 deref 到 commit，不是 tag object 自身）
+    pub commit_hash: String,
+    /// 短哈希（7位）
+    pub short_hash: String,
+    /// 是否为附注标签（annotated tag）
+    pub is_annotated: bool,
+    /// 标签的附注信息（附注标签才有）
+    pub message: String,
+    /// 标签的日期（附注标签是 tag 创建时间，轻量标签是所指向 commit 的日期）
+    pub date: String,
+}

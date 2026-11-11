@@ -81,6 +81,9 @@ pub fn run() {
             commands::undo_last_commit,
             commands::get_compare_files,
             commands::get_compare_file_diff,
+            commands::get_tags,
+            commands::delete_tag,
+            commands::push_tag,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application")

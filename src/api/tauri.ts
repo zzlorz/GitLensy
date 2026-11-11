@@ -9,6 +9,7 @@ import type {
   CommitFile,
   SyncStatus,
   StashEntry,
+  TagEntry,
   BranchList,
   OperationState,
 } from "../types";
@@ -209,9 +210,28 @@ export async function createBranch(name: string, checkout: boolean): Promise<voi
   return invoke<void>("create_branch", { name, checkout });
 }
 
-/** 新建标签；message 非空时创建附注标签 */
-export async function createTag(name: string, message?: string): Promise<void> {
-  return invoke<void>("create_tag", { name, message: message ?? null });
+/** 新建标签；message 非空时创建附注标签，commit 非空时在指定提交上创建 */
+export async function createTag(name: string, message?: string, commit?: string): Promise<void> {
+  return invoke<void>("create_tag", {
+    name,
+    message: message ?? null,
+    commit: commit ?? null,
+  });
+}
+
+/** 列出仓库中所有标签（按时间倒序） */
+export async function getTags(): Promise<TagEntry[]> {
+  return invoke<TagEntry[]>("get_tags");
+}
+
+/** 删除本地标签 */
+export async function deleteTag(name: string): Promise<void> {
+  return invoke<void>("delete_tag", { name });
+}
+
+/** 推送标签到远程仓库 (git push origin refs/tags/<name>) */
+export async function pushTag(name: string): Promise<void> {
+  return invoke<void>("push_tag", { name });
 }
 
 /** 贮藏当前工作区变更（含未跟踪文件） */

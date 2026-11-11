@@ -661,16 +661,28 @@ pub async fn create_branch(
     Ok(())
 }
 
-/// 新建标签：message 非空时创建附注标签，否则创建轻量标签
+/// 新建标签：message 非空时创建附注标签，否则创建轻量标签；
+/// commit 非空时在指定提交上打标签，否则在当前 HEAD 上打标签。
 #[tauri::command]
 pub async fn create_tag(
     state: State<'_, AppState>,
     name: String,
     message: Option<String>,
+    commit: Option<String>,
 ) -> AppResult<()> {
     let name = name.trim().to_string();
     if name.is_empty() {
         return Err(AppError::GitCommand("标签名称不能为空".to_string()));
+    }
+
+    // 校验可选的 commit hash 格式
+    let commit = commit
+        .map(|c| c.trim().to_string())
+        .filter(|c| !c.is_empty());
+    if let Some(ref c) = commit {
+        if c.len() > 40 || !c.chars().all(|ch| ch.is_ascii_hexdigit()) {
+            return Err(AppError::ParseError(format!("非法的提交哈希：{}", c)));
+        }
     }
 
     let repo_path = {
@@ -700,11 +712,90 @@ pub async fn create_tag(
     let msg = message
         .map(|m| m.trim().to_string())
         .filter(|m| !m.is_empty());
-    match msg {
-        Some(ref m) => git::run_git(path, &["tag", "-a", &name, "-m", m])?,
-        None => git::run_git(path, &["tag", &name])?,
+    match (msg, commit) {
+        (Some(ref m), Some(ref c)) => git::run_git(path, &["tag", "-a", &name, "-m", m, c])?,
+        (Some(ref m), None) => git::run_git(path, &["tag", "-a", &name, "-m", m])?,
+        (None, Some(ref c)) => git::run_git(path, &["tag", &name, c])?,
+        (None, None) => git::run_git(path, &["tag", &name])?,
     }
     Ok(())
+}
+
+/// 列出仓库中所有标签（按 creatordate 降序，最新在前）
+#[tauri::command]
+pub async fn get_tags(state: State<'_, AppState>) -> AppResult<Vec<crate::models::TagEntry>> {
+    let root = repo_path_of(&state)?;
+    let path = Path::new(&root);
+
+    // 格式：name \x1f objecttype \x1f *objectname \x1f objectname \x1f creatordate \x1f subject
+    let lines = git::run_git_lines(
+        path,
+        &[
+            "tag",
+            "-l",
+            "--sort=-creatordate",
+            "--format=%(refname:short)\x1f%(objecttype)\x1f%(*objectname)\x1f%(objectname)\x1f%(creatordate:iso8601-strict)\x1f%(subject)",
+        ],
+    )?;
+
+    let tags = lines
+        .into_iter()
+        .filter(|l| !l.trim().is_empty())
+        .filter_map(|line| {
+            let mut parts = line.splitn(6, '\x1f');
+            let name = parts.next()?.trim().to_string();
+            if name.is_empty() {
+                return None;
+            }
+            let obj_type = parts.next()?.trim().to_string();
+            let deref_hash = parts.next()?.trim().to_string(); // *objectname（附注标签才有值）
+            let obj_hash = parts.next()?.trim().to_string();   // objectname
+            let date = parts.next()?.trim().to_string();
+            let message = parts.next().unwrap_or("").trim().to_string();
+
+            let is_annotated = obj_type == "tag";
+            let commit_hash = if is_annotated {
+                deref_hash
+            } else {
+                obj_hash
+            };
+            let short_hash = commit_hash.chars().take(7).collect::<String>();
+
+            Some(crate::models::TagEntry {
+                name,
+                commit_hash,
+                short_hash,
+                is_annotated,
+                message,
+                date,
+            })
+        })
+        .collect();
+
+    Ok(tags)
+}
+
+/// 删除本地标签
+#[tauri::command]
+pub async fn delete_tag(name: String, state: State<'_, AppState>) -> AppResult<()> {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err(AppError::GitCommand("标签名称不能为空".to_string()));
+    }
+    let root = repo_path_of(&state)?;
+    git::run_git(Path::new(&root), &["tag", "-d", &name])
+}
+
+/// 推送指定标签到远程（origin）
+#[tauri::command]
+pub async fn push_tag(name: String, state: State<'_, AppState>) -> AppResult<()> {
+    let name = name.trim().to_string();
+    if name.is_empty() {
+        return Err(AppError::GitCommand("标签名称不能为空".to_string()));
+    }
+    let root = repo_path_of(&state)?;
+    let ref_spec = format!("refs/tags/{}", name);
+    git::run_git(Path::new(&root), &["push", "origin", &ref_spec])
 }
 
 /// 推送本地提交到远程
