@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import { X, Moon, Sun, Monitor, Check } from "lucide-react";
 import type { ThemeMode } from "../types";
+import {
+  PREVIEW_FONT_SIZE_DEFAULT,
+  PREVIEW_FONT_SIZE_MAX,
+  PREVIEW_FONT_SIZE_MIN,
+} from "../lib/fontSize";
 
 interface Props {
   isOpen: boolean;
@@ -10,6 +15,9 @@ interface Props {
   /** 外部编辑器命令，默认 code（VS Code） */
   editor: string;
   onEditorChange: (editor: string) => void;
+  /** Diff / 文件预览的代码字号 */
+  previewFontSize: number;
+  onPreviewFontSizeChange: (size: number) => void;
 }
 
 export default function SettingsModal({
@@ -19,6 +27,8 @@ export default function SettingsModal({
   onThemeChange,
   editor,
   onEditorChange,
+  previewFontSize,
+  onPreviewFontSizeChange,
 }: Props) {
   // 编辑器命令用本地草稿，失焦或回车时才提交，避免输入过程被裁剪
   const [editorDraft, setEditorDraft] = useState(editor);
@@ -138,6 +148,68 @@ export default function SettingsModal({
                 );
               })}
             </div>
+          </div>
+
+          <div className="settings-section">
+            <div className="settings-section-title">预览字号</div>
+            <div className="settings-section-desc">
+              调整 Diff 与文件预览的代码字号，修改后立即生效并自动保存。
+            </div>
+
+            <div className="settings-font-row">
+              <button
+                type="button"
+                className="settings-font-step"
+                title="减小字号"
+                disabled={previewFontSize <= PREVIEW_FONT_SIZE_MIN}
+                onClick={() =>
+                  onPreviewFontSizeChange(Math.max(PREVIEW_FONT_SIZE_MIN, previewFontSize - 1))
+                }
+              >
+                A−
+              </button>
+              <input
+                className="settings-font-slider"
+                type="range"
+                min={PREVIEW_FONT_SIZE_MIN}
+                max={PREVIEW_FONT_SIZE_MAX}
+                step={1}
+                value={previewFontSize}
+                onChange={(e) => onPreviewFontSizeChange(Number(e.target.value))}
+                aria-label="预览字号"
+              />
+              <button
+                type="button"
+                className="settings-font-step"
+                title="增大字号"
+                disabled={previewFontSize >= PREVIEW_FONT_SIZE_MAX}
+                onClick={() =>
+                  onPreviewFontSizeChange(Math.min(PREVIEW_FONT_SIZE_MAX, previewFontSize + 1))
+                }
+              >
+                A+
+              </button>
+              <span className="settings-font-value">{previewFontSize}px</span>
+              <button
+                type="button"
+                className="settings-editor-reset"
+                onClick={() => onPreviewFontSizeChange(PREVIEW_FONT_SIZE_DEFAULT)}
+              >
+                恢复默认
+              </button>
+            </div>
+
+            <pre
+              className="settings-font-preview"
+              style={{ fontSize: `${previewFontSize}px` }}
+            >
+              <code>
+                <span className="settings-font-comment">// 预览字号 {previewFontSize}px</span>
+                {"\n"}
+                <span className="settings-font-keyword">const</span> message ={" "}
+                <span className="settings-font-string">"可读性刚刚好"</span>;
+              </code>
+            </pre>
           </div>
 
           <div className="settings-section">

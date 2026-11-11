@@ -16,6 +16,24 @@ fn git_command() -> Command {
     cmd
 }
 
+/// 把 Git 的 stderr / stdout 合并成一条可展示的错误详情。
+///
+/// Git 有时把关键提示写到 stdout（例如 "Updating a..b"），错误写到 stderr；
+/// 只取 stderr 可能丢失上下文，因此两者都保留，stderr 放在前面。
+fn format_git_failure(args: &[&str], output: &std::process::Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    let detail = match (stderr.is_empty(), stdout.is_empty()) {
+        (false, false) => format!("{}\n{}", stderr, stdout),
+        (false, true) => stderr,
+        (true, false) => stdout,
+        (true, true) => format!("Git 进程退出码：{}", output.status),
+    };
+
+    format!("git {} failed:\n{}", args.join(" "), detail)
+}
+
 /// Run a git command in the specified working directory and return stdout as bytes.
 pub fn run_git_bytes<P: AsRef<Path>>(repo_path: P, args: &[&str]) -> AppResult<Vec<u8>> {
     let repo_path = repo_path.as_ref();
@@ -30,12 +48,7 @@ pub fn run_git_bytes<P: AsRef<Path>>(repo_path: P, args: &[&str]) -> AppResult<V
         .map_err(AppError::Io)?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        return Err(AppError::GitCommand(format!(
-            "git {} failed: {}",
-            args.join(" "),
-            stderr.trim()
-        )));
+        return Err(AppError::GitCommand(format_git_failure(args, &output)));
     }
 
     Ok(output.stdout)
@@ -82,12 +95,7 @@ pub fn run_git<P: AsRef<Path>>(repo_path: P, args: &[&str]) -> AppResult<()> {
         .map_err(AppError::Io)?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(AppError::GitCommand(format!(
-            "git {} failed: {}",
-            args.join(" "),
-            stderr
-        )));
+        return Err(AppError::GitCommand(format_git_failure(args, &output)));
     }
 
     Ok(())
@@ -105,4 +113,36 @@ pub fn get_current_branch<P: AsRef<Path>>(path: P) -> AppResult<(String, bool)> 
     let branch = branch.trim().to_string();
     let is_detached = branch == "HEAD";
     Ok((branch, is_detached))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn git_error_contains_full_stderr() {
+        // 未安装 Git 时跳过
+        if Command::new("git").arg("--version").output().is_err() {
+            return;
+        }
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!("gitlensy-git-error-{}", unique));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+
+        let message = run_git(&dir, &["status"])
+            .expect_err("git status should fail outside a repository")
+            .to_string();
+
+        let _ = std::fs::remove_dir_all(&dir);
+
+        // 命令、换行与 Git 的完整 stderr 都应保留，而不是只剩最后一句
+        assert!(message.contains("git status failed"));
+        assert!(message.contains("not a git repository"));
+        assert!(message.contains('\n'));
+    }
 }

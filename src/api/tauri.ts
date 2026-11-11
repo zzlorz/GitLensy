@@ -10,6 +10,7 @@ import type {
   SyncStatus,
   StashEntry,
   BranchList,
+  OperationState,
 } from "../types";
 
 // Repository commands
@@ -295,6 +296,27 @@ export async function rebaseBranch(onto: string): Promise<void> {
 /** 把指定提交 cherry-pick 到当前分支 */
 export async function cherryPickCommit(hash: string): Promise<void> {
   return invoke<void>("cherry_pick_commit", { hash });
+}
+
+/** Rebase / Cherry-pick 冲突后的继续或中止 */
+export async function getOperationState(): Promise<OperationState> {
+  return invoke<OperationState>("get_operation_state");
+}
+
+export async function continueRebase(): Promise<void> {
+  return invoke<void>("continue_rebase");
+}
+
+export async function abortRebase(): Promise<void> {
+  return invoke<void>("abort_rebase");
+}
+
+export async function continueCherryPick(): Promise<void> {
+  return invoke<void>("continue_cherry_pick");
+}
+
+export async function abortCherryPick(): Promise<void> {
+  return invoke<void>("abort_cherry_pick");
 }
 
 // ── 提交增强 ────────────────────────────────────────────────────────

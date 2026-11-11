@@ -180,3 +180,11 @@ pub struct CommitFile {
     pub additions: usize,
     pub deletions: usize,
 }
+
+/// 当前仓库是否处于 rebase / cherry-pick 等多步操作中。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OperationState {
+    pub in_progress: bool,
+    /// "rebase" | "cherry-pick" | "none"
+    pub kind: String,
+}

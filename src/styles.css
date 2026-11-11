@@ -81,6 +81,9 @@
   --sidebar-width: 320px;
   --toolbar-height: 48px;
   --file-section-header-height: 32px;
+  /* 预览区域字号（可在设置中调整） */
+  --preview-font-size: 12px;
+  --preview-line-height: 1.62;
 }
 
 * {
@@ -2187,8 +2190,8 @@ input {
   flex: 1;
   overflow: auto;
   font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.6;
+  font-size: var(--preview-font-size);
+  line-height: var(--preview-line-height);
   user-select: text;
   -webkit-user-select: text;
 }
@@ -2206,7 +2209,7 @@ input {
   background-color: var(--bg-secondary);
   color: var(--text-muted);
   padding: 4px 16px;
-  font-size: 11px;
+  font-size: max(9px, calc(var(--preview-font-size) - 1px));
   border-top: 1px solid var(--border-subtle);
   border-bottom: 1px solid var(--border-subtle);
   position: sticky;
@@ -2223,7 +2226,7 @@ input {
 
 .diff-line {
   display: flex;
-  min-height: 20px;
+  min-height: 1.5em;
   position: relative;
   min-width: 100%;
 }
@@ -2233,7 +2236,7 @@ input {
 }
 
 .diff-line-num {
-  width: 48px;
+  width: 4.2em;
   text-align: right;
   padding: 0 8px;
   color: var(--text-muted);
@@ -2242,7 +2245,7 @@ input {
   user-select: none;
   -webkit-user-select: none;
   cursor: default;
-  font-size: 11px;
+  font-size: max(9px, calc(var(--preview-font-size) - 1px));
 }
 
 .diff-line-content {
@@ -2304,13 +2307,14 @@ input {
   display: flex;
   align-items: flex-start;
   min-width: 0;
-  min-height: 20px;
+  min-height: 1.5em;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--preview-font-size);
+  line-height: var(--preview-line-height);
 }
 
 .diff-split-cell .diff-line-num {
-  width: 44px;
+  width: 4.2em;
   padding: 0 6px;
   border-right: 1px solid var(--border-subtle);
 }
@@ -2562,16 +2566,23 @@ input {
   border-radius: 6px;
   margin: 8px;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.55;
+  max-height: 220px;
+  overflow-y: auto;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 /* 全局错误条：分支操作 / 提交操作失败时显示在工具栏下方 */
 .global-error-bar {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
-  padding: 6px 14px;
+  padding: 8px 14px;
   font-size: 12px;
   color: var(--error-color);
   background-color: var(--deleted-bg);
@@ -2579,18 +2590,55 @@ input {
   flex-shrink: 0;
 }
 
+.global-error-bar > svg {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
 .global-error-bar > span {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  max-height: 180px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.55;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.error-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  opacity: 0.8;
+}
+
+.error-copy-btn:hover {
+  opacity: 1;
+  background-color: rgba(248, 81, 73, 0.15);
+}
+
+.error-message-text {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .global-error-close {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
   width: 20px;
   height: 20px;
   border: none;
@@ -3533,6 +3581,7 @@ input {
   border-radius: 12px;
   width: 520px;
   max-width: 95vw;
+  max-height: calc(100vh - 48px);
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
   overflow: hidden;
   display: flex;
@@ -3575,6 +3624,8 @@ input {
   display: flex;
   flex-direction: column;
   gap: 20px;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .settings-section-title {
@@ -3632,6 +3683,87 @@ input {
   margin-top: 8px;
   font-size: 11px;
   color: var(--text-muted);
+}
+
+/* 预览字号设置 */
+.settings-font-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.settings-font-step {
+  width: 34px;
+  height: 30px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.settings-font-step:hover:not(:disabled) {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.settings-font-step:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.settings-font-slider {
+  flex: 1;
+  min-width: 120px;
+  accent-color: var(--accent-color);
+  cursor: pointer;
+}
+
+.settings-font-value {
+  min-width: 46px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.settings-font-preview {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  line-height: var(--preview-line-height);
+  white-space: pre;
+  overflow: auto;
+}
+
+.settings-font-preview code {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+.settings-font-comment {
+  color: var(--text-muted);
+}
+
+.settings-font-keyword {
+  color: var(--accent-color);
+  font-weight: 600;
+}
+
+.settings-font-string {
+  color: var(--added-color);
 }
 
 /* Theme Options Grid */
@@ -4066,8 +4198,8 @@ input {
   margin: 0;
   padding: 16px;
   font-family: var(--font-mono);
-  font-size: 12.5px;
-  line-height: 1.65;
+  font-size: var(--preview-font-size);
+  line-height: var(--preview-line-height);
   color: var(--text-primary);
   white-space: pre;
   user-select: text;
@@ -4090,7 +4222,7 @@ input {
   display: block;
   width: max-content;
   min-width: 100%;
-  min-height: 1.65em;
+  min-height: 1.5em;
   white-space: pre;
 }
 
@@ -4162,8 +4294,8 @@ input {
   overflow: auto;
   padding: 6px 0;
   font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 1.65;
+  font-size: var(--preview-font-size);
+  line-height: var(--preview-line-height);
 }
 
 .file-preview-popover-line {
@@ -4447,8 +4579,8 @@ input {
   max-height: 220px;
   overflow: auto;
   font-family: var(--font-mono);
-  font-size: 11.5px;
-  line-height: 1.5;
+  font-size: var(--preview-font-size);
+  line-height: var(--preview-line-height);
   color: var(--text-secondary);
   white-space: pre;
 }
@@ -4515,8 +4647,8 @@ input {
   border-radius: 6px;
   background-color: var(--bg-primary);
   font-family: var(--font-mono);
-  font-size: 11.5px;
-  line-height: 1.5;
+  font-size: var(--preview-font-size);
+  line-height: var(--preview-line-height);
   color: var(--text-secondary);
   white-space: pre;
 }
@@ -4733,4 +4865,75 @@ body.resizing-sidebar * {
   left: -1px;
   width: 2px;
   background-color: var(--accent-color);
+}
+
+/* Rebase / Cherry-pick 进行中的操作条 */
+.git-operation-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  background-color: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.git-operation-icon {
+  flex-shrink: 0;
+  color: var(--modified-color);
+}
+
+.git-operation-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.git-operation-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.git-operation-btn:hover:not(:disabled) {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.git-operation-btn.primary {
+  background-color: var(--accent-color);
+  border-color: var(--accent-color);
+  color: #ffffff;
+}
+
+.git-operation-btn.primary:hover:not(:disabled) {
+  background-color: var(--accent-hover);
+}
+
+.git-operation-btn.danger {
+  color: var(--deleted-color);
+  border-color: rgba(248, 81, 73, 0.4);
+}
+
+.git-operation-btn.danger:hover:not(:disabled) {
+  background-color: rgba(248, 81, 73, 0.15);
+  color: var(--deleted-color);
+}
+
+.git-operation-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }

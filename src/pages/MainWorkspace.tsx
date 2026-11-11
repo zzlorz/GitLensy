@@ -4,7 +4,7 @@ import {
   GitBranch, RotateCw, FolderSync, Terminal, MoreHorizontal, Tag, Archive, ArchiveRestore, Trash2,
   FileCode2, AlertTriangle, Loader2, GitCommit, Diff, Search, Settings, X,
   Download, Upload, ChevronDown, Check, ExternalLink, Plus, Undo2,
-  Pencil, GitMerge, GitCompare, RotateCcw,
+  Pencil, GitMerge, GitCompare, RotateCcw, Copy,
 } from "lucide-react";
 import CommitList from "../components/CommitList";
 import CommitChangesView from "../components/CommitChangesView";
@@ -17,8 +17,8 @@ import SidebarResizeHandle from "../components/SidebarResizeHandle";
 import FilePreview from "../components/FilePreview";
 import ProjectSidebar from "../components/ProjectSidebar";
 import { WindowControls, WindowResizeHandles } from "../components/WindowControls";
-import type { RepositoryInfo, GitStatus, ChangedFile, DiffView, FileDiff, CommitInfo, RecentRepo, SyncStatus, StashEntry, BranchList } from "../types";
-import { getStatus, getFileDiff, saveCurrentRepo, getCommitLog, openTerminal, revertFile, stageFile, stageAll, discardAllUnstaged, commitChanges, getSyncStatus, syncChanges, pullChanges, fetchChanges, pushChanges, createBranch, createTag, stashChanges, getStashList, popStash, applyStash, dropStash, clearStashes, getBranches, checkoutBranch, openPath, getRecentRepos, openRepository, removeRecentRepo, deleteBranch, renameBranch, mergeBranch, rebaseBranch, cherryPickCommit, amendCommit, undoLastCommit } from "../api/tauri";
+import type { RepositoryInfo, GitStatus, ChangedFile, DiffView, FileDiff, CommitInfo, RecentRepo, SyncStatus, StashEntry, BranchList, OperationState } from "../types";
+import { getStatus, getFileDiff, saveCurrentRepo, getCommitLog, openTerminal, revertFile, stageFile, stageAll, discardAllUnstaged, commitChanges, getSyncStatus, syncChanges, pullChanges, fetchChanges, pushChanges, createBranch, createTag, stashChanges, getStashList, popStash, applyStash, dropStash, clearStashes, getBranches, checkoutBranch, openPath, getRecentRepos, openRepository, removeRecentRepo, deleteBranch, renameBranch, mergeBranch, rebaseBranch, cherryPickCommit, amendCommit, undoLastCommit, getOperationState, continueRebase, abortRebase, continueCherryPick, abortCherryPick } from "../api/tauri";
 import type { OpenMethod } from "../api/tauri";
 
 const PAGE_SIZE = 50;
@@ -172,6 +172,10 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
   const [gitBusy, setGitBusy] = useState(false);
   const [confirmUndoCommit, setConfirmUndoCommit] = useState(false);
   const [cherryPickTarget, setCherryPickTarget] = useState<CommitInfo | null>(null);
+  /** 当前是否处于 rebase / cherry-pick 中 */
+  const [operationState, setOperationState] = useState<OperationState | null>(null);
+  const [operationBusy, setOperationBusy] = useState(false);
+  const [confirmAbortOperation, setConfirmAbortOperation] = useState(false);
 
   // ── 打开方式下拉（一次性选择，不记录状态）──────────────────────────
   const [openMenuOpen, setOpenMenuOpen] = useState(false);
@@ -190,6 +194,8 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
   const [diffError, setDiffError] = useState<string | null>(null);
   const diffRequestId = useRef(0);
   const diffCache = useRef<Map<string, FileDiff>>(new Map());
+  /** 最近一次加载 Diff 的目标（文件 + 视图），用于区分文件切换与后台刷新 */
+  const lastDiffViewKeyRef = useRef<string | null>(null);
   /** 最近一次状态刷新的时间，用于抑制文件监听引起的重复刷新 */
   const lastStatusLoadRef = useRef(0);
   const selectedFileRef = useRef<ChangedFile | null>(null);
@@ -255,6 +261,8 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
     setBranchActionError(null);
     setConfirmUndoCommit(false);
     setCherryPickTarget(null);
+    setOperationState(null);
+    setConfirmAbortOperation(false);
 
     // 重置文件夹 tab 状态
     setSelectedFolderFile(null);
@@ -276,10 +284,12 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repo.path]);
 
-  const loadStatus = useCallback(async () => {
+  const loadStatus = useCallback(async (silent = false) => {
     lastStatusLoadRef.current = Date.now();
-    setLoading(true);
-    setError(null);
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const s = await getStatus();
       setStatus(s);
@@ -288,6 +298,12 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
         setSyncStatus(await getSyncStatus());
       } catch {
         setSyncStatus(null);
+      }
+      // rebase / cherry-pick 是否仍在进行中
+      try {
+        setOperationState(await getOperationState());
+      } catch {
+        setOperationState(null);
       }
       diffCache.current.clear();
       const currentRepo = repoRef.current;
@@ -313,7 +329,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
@@ -339,7 +355,9 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
   useEffect(() => {
     const file = selectedFileRef.current;
     if (!file || !selectedFilePath) {
+      lastDiffViewKeyRef.current = null;
       setDiff(null);
+      setDiffLoading(false);
       return;
     }
 
@@ -355,8 +373,11 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
     const requestId = ++diffRequestId.current;
     setDiffError(null);
 
-    // 注意：这里不使用缓存，每次 selectedFile 对象引用变化（刷新后）都重新请求最新 diff
-    setDiffLoading(true);
+    // 同一文件 / 视图的后台刷新不显示加载态，避免自动刷新时预览区闪动
+    const viewKey = `${selectedFilePath}\u0000${view}`;
+    const sameTarget = lastDiffViewKeyRef.current === viewKey;
+    lastDiffViewKeyRef.current = viewKey;
+    if (!sameTarget) setDiffLoading(true);
 
     getFileDiff(selectedFilePath, view)
       .then((d) => {
@@ -956,6 +977,65 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
     }
   }, [cherryPickTarget, gitBusy, loadStatus, refreshHistory]);
 
+  /** 继续当前 rebase / cherry-pick */
+  const handleContinueOperation = useCallback(async () => {
+    if (!operationState?.in_progress || operationBusy) return;
+    const kind = operationState.kind;
+    setOperationBusy(true);
+    setError(null);
+    try {
+      if (kind === "rebase") {
+        await continueRebase();
+      } else if (kind === "cherry-pick") {
+        await continueCherryPick();
+      }
+      await loadStatus();
+      await refreshHistory();
+      setFolderRefreshKey((k) => k + 1);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      // 继续后可能又在下一个提交处产生新冲突，刷新后自动打开冲突列表
+      const latest = await loadStatus();
+      setError(message);
+      if (statusHasConflicts(latest)) {
+        setShowUncommitted(true);
+        setSelectedCommit(null);
+        setCompareFrom(null);
+        setSelectedFile(null);
+        setRightPanelMode("all");
+      }
+    } finally {
+      setOperationBusy(false);
+    }
+  }, [operationState, operationBusy, loadStatus, refreshHistory]);
+
+  /** 中止当前 rebase / cherry-pick，恢复到操作前 */
+  const handleAbortOperation = useCallback(async () => {
+    if (!operationState?.in_progress || operationBusy) return;
+    const kind = operationState.kind;
+    setConfirmAbortOperation(false);
+    setOperationBusy(true);
+    setError(null);
+    try {
+      if (kind === "rebase") {
+        await abortRebase();
+      } else if (kind === "cherry-pick") {
+        await abortCherryPick();
+      }
+      setSelectedFile(null);
+      setDiff(null);
+      setRightPanelMode("all");
+      await loadStatus();
+      await refreshHistory();
+      setFolderRefreshKey((k) => k + 1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      await loadStatus();
+    } finally {
+      setOperationBusy(false);
+    }
+  }, [operationState, operationBusy, loadStatus, refreshHistory]);
+
   const closeToolDialog = useCallback(() => {
     if (toolBusy) return;
     setToolAction(null);
@@ -1109,6 +1189,8 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
 
   // ── 窗口回到顶层时自动刷新：变更文件 + 历史记录 + 文件夹目录 ─────────
   const lastAutoRefreshRef = useRef(0);
+  /** 窗口真正失去焦点的时间，用于忽略点击窗口引起的 focus 事件 */
+  const windowBlurredAtRef = useRef(0);
   const handleAutoRefreshRef = useRef<() => void>(() => {});
   handleAutoRefreshRef.current = () => {
     const now = Date.now();
@@ -1116,15 +1198,30 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
     if (now - lastAutoRefreshRef.current < 1200) return;
     lastAutoRefreshRef.current = now;
 
-    loadStatusRef.current();
+    // 自动刷新使用静默模式：不显示整页加载态，保留当前预览内容
+    loadStatusRef.current(true);
     refreshHistory();
     setFolderRefreshKey((k) => k + 1);
   };
 
   useEffect(() => {
-    const handleFocus = () => handleAutoRefreshRef.current();
+    const handleBlur = () => {
+      windowBlurredAtRef.current = Date.now();
+    };
+    const handleFocus = () => {
+      const blurredAt = windowBlurredAtRef.current;
+      windowBlurredAtRef.current = 0;
+      // 点击窗口 / 工具栏时也可能收到 focus；只有真正离开过窗口才刷新
+      if (!blurredAt || Date.now() - blurredAt < 2000) return;
+      handleAutoRefreshRef.current();
+    };
+
+    window.addEventListener("blur", handleBlur);
     window.addEventListener("focus", handleFocus);
-    return () => window.removeEventListener("focus", handleFocus);
+    return () => {
+      window.removeEventListener("blur", handleBlur);
+      window.removeEventListener("focus", handleFocus);
+    };
   }, []);
 
   // ── 文件系统监听：工作区文件变化时自动刷新变更 / 历史 / 目录树 ─────
@@ -1529,10 +1626,61 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
         </div>
       </div>
 
+      {operationState?.in_progress && (
+        <div className={`git-operation-bar ${operationState.kind}`}>
+          <GitMerge size={14} className="git-operation-icon" />
+          <span className="git-operation-text">
+            {operationState.kind === "rebase" ? "正在 Rebase" : "正在 Cherry-pick"}
+            {conflictCount > 0
+              ? `：还有 ${conflictCount} 个冲突待解决，解决并暂存后可继续`
+              : "：冲突已解决，可以继续"}
+          </span>
+          <button
+            type="button"
+            className="git-operation-btn primary"
+            onClick={handleContinueOperation}
+            disabled={operationBusy || conflictCount > 0}
+            title={
+              conflictCount > 0
+                ? "仍有未解决的冲突，请先解决并暂存所有冲突文件"
+                : "继续当前操作"
+            }
+          >
+            {operationBusy ? (
+              <Loader2 size={12} className="spin" />
+            ) : (
+              <Check size={12} />
+            )}
+            <span>继续</span>
+          </button>
+          <button
+            type="button"
+            className="git-operation-btn danger"
+            onClick={() => setConfirmAbortOperation(true)}
+            disabled={operationBusy}
+            title="中止当前操作并恢复到操作前的状态"
+          >
+            <X size={12} />
+            <span>中止</span>
+          </button>
+        </div>
+      )}
+
       {error && !showUncommitted && (
         <div className="global-error-bar">
           <AlertTriangle size={13} />
           <span>{error}</span>
+          <button
+            type="button"
+            className="error-copy-btn"
+            title="复制完整错误信息"
+            onClick={() => {
+              navigator.clipboard.writeText(error).catch(() => {});
+            }}
+          >
+            <Copy size={12} />
+            <span>复制</span>
+          </button>
           <button
             type="button"
             className="global-error-close"
@@ -1795,7 +1943,18 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
 
                 {error && (
                   <div className="error-message" style={{ margin: "10px 12px 0" }}>
-                    {error}
+                    <span className="error-message-text">{error}</span>
+                    <button
+                      type="button"
+                      className="error-copy-btn"
+                      title="复制完整错误信息"
+                      onClick={() => {
+                        navigator.clipboard.writeText(error).catch(() => {});
+                      }}
+                    >
+                      <Copy size={12} />
+                      <span>复制</span>
+                    </button>
                   </div>
                 )}
 
@@ -2273,6 +2432,24 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
           cancelText="取消"
           onConfirm={handleCherryPickConfirm}
           onCancel={() => setCherryPickTarget(null)}
+        />
+      )}
+
+      {/* ── 中止 Rebase / Cherry-pick 确认 ──────────────────────── */}
+      {confirmAbortOperation && operationState?.in_progress && (
+        <ConfirmDialog
+          title={
+            operationState.kind === "rebase"
+              ? "确认中止 Rebase"
+              : "确认中止 Cherry-pick"
+          }
+          message={`将中止当前${
+            operationState.kind === "rebase" ? " Rebase" : " Cherry-pick"
+          } 并恢复到操作前的状态，已解决的冲突内容不会保留。\n\n此操作不可恢复。`}
+          confirmText="中止操作"
+          cancelText="继续解决"
+          onConfirm={handleAbortOperation}
+          onCancel={() => setConfirmAbortOperation(false)}
         />
       )}
       </div>

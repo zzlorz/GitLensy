@@ -124,3 +124,9 @@ export interface CommitFile {
   additions: number;
   deletions: number;
 }
+
+/** 当前仓库是否处于 rebase / cherry-pick 等多步操作中 */
+export interface OperationState {
+  in_progress: boolean;
+  kind: "rebase" | "cherry-pick" | "none";
+}

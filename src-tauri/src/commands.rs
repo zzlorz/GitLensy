@@ -3,7 +3,7 @@ use std::path::Path;
 use tauri::State;
 
 use crate::error::{AppError, AppResult};
-use crate::models::{CommitFile, CommitInfo, DiffView, FileDiff, GitStatus, RepositoryInfo, SyncStatus};
+use crate::models::{CommitFile, CommitInfo, DiffView, FileDiff, GitStatus, OperationState, RepositoryInfo, SyncStatus};
 use crate::repository;
 use crate::{diff, git, history, status, AppState};
 
@@ -471,6 +471,11 @@ pub async fn commit_changes(state: State<'_, AppState>, message: String) -> AppR
             "存在未解决的合并冲突，请手动解决后再提交".to_string(),
         ));
     }
+    if rebase_in_progress(path) {
+        return Err(AppError::GitCommand(
+            "当前正在进行 Rebase，请解决冲突后点击上方「继续」，或中止后再操作".to_string(),
+        ));
+    }
 
     git::run_git(path, &["commit", "-m", message])?;
     Ok(())
@@ -524,6 +529,15 @@ pub async fn get_sync_status(state: State<'_, AppState>) -> AppResult<SyncStatus
     sync_status_for(Path::new(&repo_path))
 }
 
+/// 分支已分叉且无法快进时，给出比 Git 原始 fatal 更明确的提示。
+fn diverged_pull_error(sync: &SyncStatus) -> AppError {
+    AppError::GitCommand(format!(
+        "本地分支与远程分支已分叉（领先 {} 个提交，落后 {} 个提交），无法使用快进方式拉取。\n\
+         请先执行 rebase 或 merge 远程分支，或在终端中手动执行 git pull 解决分叉。",
+        sync.ahead, sync.behind
+    ))
+}
+
 /// 同步到远程仓库：落后时先快进拉取，再推送本地提交。
 #[tauri::command]
 pub async fn sync_changes(state: State<'_, AppState>) -> AppResult<()> {
@@ -547,6 +561,9 @@ pub async fn sync_changes(state: State<'_, AppState>) -> AppResult<()> {
         return Err(AppError::GitCommand(
             "当前分支未关联远程分支，无法同步".to_string(),
         ));
+    }
+    if sync.ahead > 0 && sync.behind > 0 {
+        return Err(diverged_pull_error(&sync));
     }
 
     if sync.behind > 0 {
@@ -574,10 +591,15 @@ pub async fn pull_changes(state: State<'_, AppState>) -> AppResult<()> {
             "存在未解决的合并冲突，请手动解决后再拉取".to_string(),
         ));
     }
-    if !sync_status_for(path)?.has_upstream {
+
+    let sync = sync_status_for(path)?;
+    if !sync.has_upstream {
         return Err(AppError::GitCommand(
             "当前分支未关联远程分支，无法拉取".to_string(),
         ));
+    }
+    if sync.ahead > 0 && sync.behind > 0 {
+        return Err(diverged_pull_error(&sync));
     }
 
     git::run_git(path, &["pull", "--ff-only"])?;
@@ -1236,6 +1258,125 @@ pub async fn cherry_pick_commit(hash: String, state: State<'_, AppState>) -> App
     Ok(())
 }
 
+// ── Rebase / Cherry-pick 冲突后继续或中止 ─────────────────────────────
+
+/// 仓库的 `.git` 目录（支持 worktree 返回的绝对 / 相对路径）。
+fn repo_git_dir(repo: &Path) -> Option<std::path::PathBuf> {
+    let raw = git::run_git_string(repo, &["rev-parse", "--git-dir"]).ok()?;
+    let path = std::path::PathBuf::from(raw.trim());
+    Some(if path.is_absolute() { path } else { repo.join(path) })
+}
+
+fn rebase_in_progress(repo: &Path) -> bool {
+    repo_git_dir(repo)
+        .map(|dir| dir.join("rebase-merge").exists() || dir.join("rebase-apply").exists())
+        .unwrap_or(false)
+}
+
+fn cherry_pick_in_progress(repo: &Path) -> bool {
+    repo_git_dir(repo)
+        .map(|dir| dir.join("CHERRY_PICK_HEAD").exists())
+        .unwrap_or(false)
+}
+
+/// 查询当前仓库是否处于 rebase / cherry-pick 中。
+#[tauri::command]
+pub async fn get_operation_state(state: State<'_, AppState>) -> AppResult<OperationState> {
+    let root = repo_path_of(&state)?;
+    let path = Path::new(&root);
+
+    let kind = if rebase_in_progress(path) {
+        "rebase"
+    } else if cherry_pick_in_progress(path) {
+        "cherry-pick"
+    } else {
+        "none"
+    };
+
+    Ok(OperationState {
+        in_progress: kind != "none",
+        kind: kind.to_string(),
+    })
+}
+
+fn ensure_no_conflicts_before_continue(path: &Path) -> AppResult<()> {
+    if has_unmerged_changes(path)? {
+        return Err(AppError::GitCommand(
+            "仍有未解决的冲突，请先解决冲突并暂存所有冲突文件后再继续".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// 继续 Rebase。使用 core.editor=true 避免无终端环境下弹出编辑器。
+#[tauri::command]
+pub async fn continue_rebase(state: State<'_, AppState>) -> AppResult<()> {
+    let root = repo_path_of(&state)?;
+    let path = Path::new(&root);
+
+    if !rebase_in_progress(path) {
+        return Err(AppError::GitCommand(
+            "当前没有进行中的 rebase 操作".to_string(),
+        ));
+    }
+    ensure_no_conflicts_before_continue(path)?;
+
+    git::run_git(path, &["-c", "core.editor=true", "rebase", "--continue"])?;
+    Ok(())
+}
+
+/// 中止 Rebase，回到 rebase 前的状态。
+#[tauri::command]
+pub async fn abort_rebase(state: State<'_, AppState>) -> AppResult<()> {
+    let root = repo_path_of(&state)?;
+    let path = Path::new(&root);
+
+    if !rebase_in_progress(path) {
+        return Err(AppError::GitCommand(
+            "当前没有进行中的 rebase 操作".to_string(),
+        ));
+    }
+
+    git::run_git(path, &["rebase", "--abort"])?;
+    Ok(())
+}
+
+/// 继续 Cherry-pick。使用 core.editor=true 避免无终端环境下弹出编辑器。
+#[tauri::command]
+pub async fn continue_cherry_pick(state: State<'_, AppState>) -> AppResult<()> {
+    let root = repo_path_of(&state)?;
+    let path = Path::new(&root);
+
+    if !cherry_pick_in_progress(path) {
+        return Err(AppError::GitCommand(
+            "当前没有进行中的 cherry-pick 操作".to_string(),
+        ));
+    }
+    ensure_no_conflicts_before_continue(path)?;
+
+    git::run_git(
+        path,
+        &["-c", "core.editor=true", "cherry-pick", "--continue"],
+    )?;
+    Ok(())
+}
+
+/// 中止 Cherry-pick，回到操作前的状态。
+#[tauri::command]
+pub async fn abort_cherry_pick(state: State<'_, AppState>) -> AppResult<()> {
+    let root = repo_path_of(&state)?;
+    let path = Path::new(&root);
+
+    if !cherry_pick_in_progress(path) {
+        return Err(AppError::GitCommand(
+            "当前没有进行中的 cherry-pick 操作".to_string(),
+        ));
+    }
+
+    git::run_git(path, &["cherry-pick", "--abort"])?;
+    Ok(())
+}
+
 // ── 提交增强 ──────────────────────────────────────────────────────────
 
 /// 修正上一次提交：message 为空时保留原提交信息（--no-edit）。
@@ -1250,6 +1391,11 @@ pub async fn amend_commit(
     if has_unmerged_changes(path)? {
         return Err(AppError::GitCommand(
             "存在未解决的合并冲突，请先解决冲突".to_string(),
+        ));
+    }
+    if rebase_in_progress(path) {
+        return Err(AppError::GitCommand(
+            "当前正在进行 Rebase，无法 Amend，请先继续或中止 Rebase".to_string(),
         ));
     }
     if git::run_git(path, &["rev-parse", "--verify", "HEAD"]).is_err() {
@@ -1275,6 +1421,11 @@ pub async fn undo_last_commit(state: State<'_, AppState>) -> AppResult<()> {
     if has_unmerged_changes(path)? {
         return Err(AppError::GitCommand(
             "存在未解决的合并冲突，请先解决冲突".to_string(),
+        ));
+    }
+    if rebase_in_progress(path) {
+        return Err(AppError::GitCommand(
+            "当前正在进行 Rebase，无法撤销提交，请先继续或中止 Rebase".to_string(),
         ));
     }
     if git::run_git(path, &["rev-parse", "--verify", "HEAD^"]).is_err() {
@@ -1315,4 +1466,54 @@ pub async fn get_compare_file_diff(
         &file_path,
         old_path.as_deref(),
     )
+}
+
+#[cfg(test)]
+mod operation_tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_repo() -> Option<std::path::PathBuf> {
+        if std::process::Command::new("git")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return None;
+        }
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!("gitlensy-op-test-{}", unique));
+        std::fs::create_dir_all(&dir).ok()?;
+        git::run_git(&dir, &["init"]).ok()?;
+        Some(dir)
+    }
+
+    #[test]
+    fn detects_rebase_and_cherry_pick_markers() {
+        let Some(dir) = temp_repo() else { return };
+
+        assert!(!rebase_in_progress(&dir));
+        assert!(!cherry_pick_in_progress(&dir));
+
+        // rebase-merge / rebase-apply 任一存在即视为 rebase 中
+        std::fs::create_dir_all(dir.join(".git").join("rebase-merge"))
+            .expect("create rebase marker");
+        assert!(rebase_in_progress(&dir));
+        std::fs::remove_dir_all(dir.join(".git").join("rebase-merge")).ok();
+
+        std::fs::create_dir_all(dir.join(".git").join("rebase-apply"))
+            .expect("create rebase-apply marker");
+        assert!(rebase_in_progress(&dir));
+        std::fs::remove_dir_all(dir.join(".git").join("rebase-apply")).ok();
+
+        std::fs::write(dir.join(".git").join("CHERRY_PICK_HEAD"), "deadbeef")
+            .expect("create cherry-pick marker");
+        assert!(cherry_pick_in_progress(&dir));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

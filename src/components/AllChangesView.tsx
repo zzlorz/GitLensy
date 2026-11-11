@@ -87,6 +87,9 @@ export default function AllChangesView({
     saveDiffLayout(next);
   };
 
+  const hasLoadedDiffs = Object.keys(diffs).length > 0;
+  const showInitialLoading = loading && !hasLoadedDiffs;
+
   return (
     <div className="all-changes-view">
       <div className="all-changes-toolbar">
@@ -113,18 +116,18 @@ export default function AllChangesView({
       </div>
 
       <div className="all-changes-scroll">
-        {loading && (
+        {showInitialLoading && (
           <div className="all-changes-loading">
             <Loader2 size={20} className="spin" />
             <span>正在加载变更内容…</span>
           </div>
         )}
 
-        {!loading && entries.length === 0 && (
+        {!showInitialLoading && entries.length === 0 && (
           <div className="all-changes-loading">当前没有变更文件</div>
         )}
 
-        {!loading &&
+        {!showInitialLoading &&
           entries.map((entry) => {
             const key = entryKey(entry);
             const status = entry.view === "unstaged"

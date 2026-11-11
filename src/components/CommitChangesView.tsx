@@ -114,7 +114,7 @@ export default function CommitChangesView({
     return () => {
       cancelled = true;
     };
-  }, [commit.hash, compareFrom]);
+  }, [commit.hash, compareFrom?.hash]);
 
   const changeLayout = (next: DiffLayout) => {
     setLayout(next);
