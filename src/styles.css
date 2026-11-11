@@ -476,19 +476,36 @@ input {
   line-height: 1;
   user-select: none;
   overflow: hidden;
+  text-align: center;
+  box-sizing: border-box;
 }
 
 .repo-avatar-letter {
-  font-family: var(--font-mono);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  text-align: center;
+  line-height: 1;
+  font-family: var(--font-family);
+  font-weight: 600;
+  text-transform: uppercase;
 }
 
 .repo-avatar-num {
-  margin-left: 1px;
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
   font-family: var(--font-mono);
-  font-size: 0.68em;
+  font-size: 7.5px;
   font-weight: 700;
   line-height: 1;
-  opacity: 0.9;
+  padding: 0 1.5px;
+  border-radius: 2px;
+  background-color: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  pointer-events: none;
 }
 
 .toolbar-repo-name {
@@ -903,22 +920,37 @@ input {
   display: flex;
   flex-direction: column;
   background-color: var(--bg-chrome);
+  border-right: 1px solid var(--border-subtle);
   overflow: hidden;
 }
 
 .project-sidebar.collapsed {
   width: 40px;
+  display: flex;
+  flex-direction: column;
   align-items: center;
   gap: 6px;
   overflow-y: auto;
   overflow-x: hidden;
+  border-right: 1px solid var(--border-subtle);
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.project-sidebar.collapsed::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 /* 折叠态顶部保留与工具栏同高的 header，保证顶部对齐 */
 .project-sidebar.collapsed .project-sidebar-header {
   width: 100%;
+  display: flex;
+  align-items: center;
   justify-content: center;
   padding: 0;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .project-sidebar-header {
@@ -928,6 +960,7 @@ input {
   height: var(--toolbar-height);
   padding: 0 8px 0 12px;
   flex-shrink: 0;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .project-sidebar-logo {
@@ -961,6 +994,7 @@ input {
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
+  transition: all 0.15s ease;
 }
 
 .project-sidebar-collapse:hover {
@@ -973,49 +1007,109 @@ input {
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  padding-bottom: 8px;
+  padding: 6px 0 10px;
+  width: 100%;
+}
+
+.project-rail-item-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+
+.project-rail-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background-color: var(--accent-color);
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+  box-shadow: 0 0 0 1.5px var(--bg-chrome);
+  pointer-events: none;
+}
+
+.project-rail-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px dashed var(--border-color);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  margin-top: 4px;
+  transition: all 0.15s ease;
+}
+
+.project-rail-add:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--accent-color);
 }
 
 .project-rail-item {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 2px;
-  border-radius: 5px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 6px;
   flex-shrink: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  position: relative;
+  transition: background-color 0.12s ease;
 }
 
 .project-rail-item:hover {
   background-color: var(--bg-hover);
 }
 
+.project-rail-item.active {
+  background-color: var(--bg-active);
+}
+
 /* 折叠态头像统一灰色，当前项目为浅绿 */
 .project-rail-item .repo-avatar {
   background-color: var(--bg-tertiary) !important;
   color: var(--text-secondary);
-  font-size: 11px !important;
+  font-size: 11.5px !important;
 }
 
-.project-rail-item .repo-avatar-num {
-  color: var(--text-muted);
-  text-shadow: none;
+.project-rail-item:hover .repo-avatar {
+  color: var(--text-primary);
 }
 
 .project-rail-item.active .repo-avatar {
-  background-color: var(--bg-active) !important;
+  background-color: transparent !important;
   color: var(--accent-color);
-  box-shadow: inset 0 0 0 1px var(--accent-color);
+  box-shadow: none;
 }
 
 .project-sidebar-search {
   position: relative;
   padding: 6px 8px;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
 }
 
 .project-sidebar-search-icon {
   position: absolute;
-  left: 15px;
+  left: 16px;
   top: 50%;
   transform: translateY(-50%);
   color: var(--text-muted);
@@ -1024,43 +1118,88 @@ input {
 
 .project-sidebar-search-input {
   width: 100%;
-  height: 24px;
-  padding: 0 6px 0 24px;
-  border: none;
-  border-radius: 4px;
+  height: 26px;
+  padding: 0 24px 0 26px;
+  border: 1px solid transparent;
+  border-radius: 5px;
   background-color: var(--bg-primary);
   color: var(--text-primary);
   font-size: 11px;
   outline: none;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.project-sidebar-search-input:focus {
+  border-color: var(--accent-color);
+}
+
+.project-sidebar-search-clear {
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 50%;
+  background-color: var(--bg-tertiary);
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.12s ease;
+}
+
+.project-sidebar-search-clear:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .project-sidebar-list {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding-bottom: 6px;
+  padding: 4px 0 6px;
 }
 
 .project-node {
   border-bottom: none;
+  margin-bottom: 2px;
 }
 
-.project-node.active {
-  background-color: var(--bg-active);
-  box-shadow: inset 2px 0 0 var(--accent-color);
-}
-
+/* 激活态仅在标题行生效，避免整个展开子树被底色污染 */
 .project-node-row {
   display: flex;
   align-items: center;
-  gap: 3px;
-  padding: 5px 4px 5px 2px;
+  gap: 4px;
+  padding: 5px 6px 5px 4px;
+  margin: 1px 4px;
+  border-radius: 6px;
   cursor: pointer;
   min-width: 0;
+  position: relative;
+  transition: background-color 0.12s ease;
 }
 
 .project-node-row:hover {
   background-color: var(--bg-hover);
+}
+
+.project-node-row.active {
+  background-color: var(--bg-active);
+}
+
+.project-node-row.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 5px;
+  bottom: 5px;
+  width: 2.5px;
+  border-radius: 2px;
+  background-color: var(--accent-color);
 }
 
 .project-node-toggle {
@@ -1074,10 +1213,21 @@ input {
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
+  border-radius: 3px;
+  transition: all 0.12s ease;
+}
+
+.project-node-toggle:hover {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
 }
 
 .project-node-icon {
   flex-shrink: 0;
+  color: var(--text-secondary);
+}
+
+.project-node-icon.active-repo {
   color: var(--accent-color);
 }
 
@@ -1085,11 +1235,35 @@ input {
   flex: 1;
   min-width: 0;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.project-node-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 76px;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background-color: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 14px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border: 1px solid var(--border-subtle);
+}
+
+.project-node-branch svg {
+  flex-shrink: 0;
+  color: var(--accent-color);
 }
 
 .project-node-count {
@@ -1142,7 +1316,7 @@ input {
 .project-node-children .folder-tree-node {
   height: 22px;
   font-size: 11.5px;
-  padding-right: 4px;
+  padding-right: 6px;
 }
 
 .project-tree-loading {
@@ -1159,10 +1333,12 @@ input {
   height: var(--file-section-header-height);
   flex-shrink: 0;
   border: none;
+  border-top: 1px solid var(--border-subtle);
   background: transparent;
   color: var(--text-muted);
   font-size: 11px;
   cursor: pointer;
+  transition: all 0.12s ease;
 }
 
 .project-sidebar-add:hover {
@@ -1183,7 +1359,7 @@ input {
 }
 
 .sidebar-search {
-  padding: 10px 12px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--border-subtle);
   position: relative;
   display: flex;
@@ -1265,7 +1441,7 @@ input {
 
 .sidebar-search-input {
   width: 100%;
-  padding: 6px 12px 6px 32px;
+  padding: 6px 28px 6px 32px;
   background-color: var(--bg-primary);
   border: 1px solid var(--border-color);
   border-radius: 6px;
@@ -1281,6 +1457,30 @@ input {
 
 .sidebar-search-input::placeholder {
   color: var(--text-muted);
+}
+
+.sidebar-search-clear {
+  position: absolute;
+  right: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 50%;
+  background-color: var(--bg-tertiary);
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.12s ease;
+}
+
+.sidebar-search-clear:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .file-list-container {
@@ -2665,9 +2865,49 @@ input {
 
 /* Sidebar Tabs */
 .sidebar-tabs-container {
-  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px 0 14px;
   background-color: transparent;
   border-bottom: 1px solid var(--border-subtle);
+  min-height: 40px;
+}
+
+.sidebar-tabs-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sidebar-commits-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.sidebar-refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.sidebar-refresh-btn:hover:not(:disabled) {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.sidebar-refresh-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .sidebar-tabs {
@@ -2885,7 +3125,7 @@ input {
 .commit-meta {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   font-size: 11px;
   color: var(--text-muted);
 }
@@ -2894,18 +3134,79 @@ input {
   font-family: var(--font-mono);
   color: var(--accent-color);
   font-weight: 600;
+  padding: 1px 4px;
+  border-radius: 3px;
+  cursor: copy;
+  transition: all 0.12s ease;
+}
+
+.commit-hash:hover {
+  background-color: var(--bg-hover);
+  text-decoration: underline;
 }
 
 .commit-author {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 90px;
+  max-width: 100px;
+  color: var(--text-secondary);
 }
 
 .commit-date {
   margin-left: auto;
   flex-shrink: 0;
+  font-size: 10.5px;
+}
+
+/* 提交对比浮条 */
+.commit-compare-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  margin: 4px 8px;
+  border-radius: 6px;
+  background-color: rgba(224, 164, 88, 0.12);
+  border: 1px solid rgba(224, 164, 88, 0.25);
+  font-size: 11.5px;
+  color: var(--warning-color);
+  animation: repo-dropdown-in 0.15s ease-out;
+}
+
+.commit-compare-banner-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.commit-compare-banner-icon {
+  flex-shrink: 0;
+  color: var(--warning-color);
+}
+
+.commit-compare-banner-left code {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  background-color: rgba(0, 0, 0, 0.25);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.commit-compare-banner-clear {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: all 0.12s ease;
+}
+
+.commit-compare-banner-clear:hover {
+  background-color: rgba(224, 164, 88, 0.2);
+  color: var(--text-primary);
 }
 
 .commit-list-loading,
@@ -2936,18 +3237,58 @@ input {
   border-left-color: transparent;
 }
 
+.commit-item.uncommitted-item.has-changes {
+  border-left-color: var(--modified-color);
+}
+
 .commit-item.uncommitted-item.selected {
   border-left-color: var(--accent-color);
 }
 
 .commit-uncommitted-graph {
   justify-content: center;
-  color: var(--accent-color);
+}
+
+.uncommitted-icon-dirty {
+  color: var(--modified-color);
+}
+
+.uncommitted-icon-clean {
+  color: var(--text-muted);
+  opacity: 0.8;
+}
+
+.uncommitted-subject {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.uncommitted-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background-color: var(--modified-color);
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 15px;
 }
 
 .commit-uncommitted-count {
-  color: var(--text-secondary);
   font-weight: 600;
+}
+
+.commit-uncommitted-count.dirty {
+  color: var(--modified-color);
+}
+
+.commit-uncommitted-count.clean {
+  color: var(--text-secondary);
 }
 
 .commit-uncommitted-hint {
@@ -4036,17 +4377,32 @@ input {
 }
 
 .folder-tree-node {
+  position: relative;
   display: flex;
   align-items: center;
   height: 24px;
-  padding: 0 12px 0 0;
+  padding: 0 10px 0 0;
   cursor: pointer;
   font-size: 12px;
-  gap: 4px;
+  gap: 5px;
   transition: background-color 0.1s;
   white-space: nowrap;
   overflow: hidden;
   border-left: 2px solid transparent;
+}
+
+.folder-tree-indent-guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background-color: var(--border-subtle);
+  opacity: 0.75;
+  pointer-events: none;
+}
+
+.folder-tree-node:hover .folder-tree-indent-guide {
+  opacity: 1;
 }
 
 .folder-tree-node:hover {
@@ -4100,6 +4456,28 @@ input {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  transition: color 0.1s ease;
+}
+
+/* 变更状态对文件名的高亮着色（类似 VS Code 体验） */
+.folder-tree-label.status-modified {
+  color: var(--modified-color);
+}
+
+.folder-tree-label.status-added,
+.folder-tree-label.status-untracked {
+  color: var(--added-color);
+}
+
+.folder-tree-label.status-deleted {
+  color: var(--deleted-color);
+  text-decoration: line-through;
+  opacity: 0.8;
+}
+
+.folder-tree-label.status-conflict {
+  color: var(--conflict-color);
+  font-weight: 600;
 }
 
 .folder-tree-badge {

@@ -671,6 +671,29 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
     }
   }, []);
 
+  /** 检出指定提交 (git checkout <hash>) */
+  const handleCheckoutCommit = useCallback(
+    async (commit: CommitInfo) => {
+      if (gitBusy) return;
+      setGitBusy(true);
+      setError(null);
+      try {
+        await checkoutBranch(commit.hash, false);
+        const info = await openRepository(repo.path);
+        saveCurrentRepo(info);
+        onRepoUpdate(info);
+        await loadStatus();
+        await refreshHistory();
+        setFolderRefreshKey((k) => k + 1);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setGitBusy(false);
+      }
+    },
+    [gitBusy, repo.path, onRepoUpdate, loadStatus, refreshHistory]
+  );
+
   /** 工具栏：获取远程更新（git fetch）并刷新本地状态 */
   const handleFetch = useCallback(async () => {
     if (remoteBusy) return;
@@ -1283,6 +1306,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
       <ProjectSidebar
         repos={recentRepos}
         currentRepoPath={repo.path}
+        currentBranch={repo.branch}
         status={status}
         selectedPath={selectedFolderFile?.fullPath ?? null}
         refreshKey={folderRefreshKey}
@@ -1696,7 +1720,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
       <div className="main-content">
         {/* ── Sidebar (Column 1) ─────────────────────────────────── */}
         <div className="sidebar" style={{ width: commitSidebarWidth }}>
-          {/* Top of Sidebar: 提交记录（变更 tab 暂时隐藏） */}
+          {/* Top of Sidebar: 提交记录与统计 */}
           <div className="sidebar-tabs-container">
             <div className="sidebar-tabs" role="tablist">
               <button
@@ -1709,10 +1733,29 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                 <span>提交记录</span>
               </button>
             </div>
+            <div className="sidebar-tabs-meta">
+              <span className="sidebar-commits-count" title="已加载提交数量">
+                {filter.trim()
+                  ? `匹配 ${filteredCommits.length} / ${commits.length}`
+                  : `共 ${commits.length} 次提交`}
+              </span>
+              <button
+                type="button"
+                className="sidebar-refresh-btn"
+                title="刷新提交记录与状态"
+                onClick={() => {
+                  refreshHistory();
+                  loadStatus();
+                }}
+                disabled={gitBusy || logLoading}
+              >
+                <RotateCw size={12} className={logLoading ? "spin" : ""} />
+              </button>
+            </div>
           </div>
 
           <div className="sidebar-search">
-            <Search size={14} className="sidebar-search-icon" />
+            <Search size={13} className="sidebar-search-icon" />
             <input
               type="text"
               className="sidebar-search-input"
@@ -1720,6 +1763,16 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
             />
+            {filter && (
+              <button
+                type="button"
+                className="sidebar-search-clear"
+                onClick={() => setFilter("")}
+                title="清空搜索"
+              >
+                <X size={12} />
+              </button>
+            )}
           </div>
 
           {logError && <div className="error-message">{logError}</div>}
@@ -1735,6 +1788,10 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
             onSelectUncommitted={handleSelectUncommitted}
             compareBaseHash={compareFrom?.hash ?? null}
             onToggleCompareBase={handleToggleCompareBase}
+            onCherryPick={setCherryPickTarget}
+            onCheckout={handleCheckoutCommit}
+            onCreateBranch={() => openToolDialog("branch")}
+            onCreateTag={() => openToolDialog("tag")}
             uncommittedContent={
               status ? (
                 <FileList

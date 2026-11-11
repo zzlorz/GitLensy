@@ -1,6 +1,25 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { readDir, type DirEntry } from "@tauri-apps/plugin-fs";
-import { ChevronDown, ChevronRight, Folder, FolderOpen, FileText, Loader2, AlertCircle } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronRight,
+  Folder,
+  FolderOpen,
+  FileText,
+  FileCode,
+  FileCode2,
+  FileJson,
+  FileSpreadsheet,
+  FileCog,
+  FileTerminal,
+  FileArchive,
+  Image as FileImageIcon,
+  ExternalLink,
+  Copy,
+  Loader2,
+  AlertCircle,
+} from "lucide-react";
+import { openPath } from "../api/tauri";
 import type { GitStatus, ChangedFile, FileStatus } from "../types";
 
 interface TreeNode {
@@ -21,7 +40,19 @@ interface Props {
   selectedPath: string | null;
 }
 
-const EXCLUDED_DIRS = new Set([".git", "node_modules", "dist", "build", "target", ".next", ".cache", ".idea", ".vscode", "__pycache__", ".turbo"]);
+const EXCLUDED_DIRS = new Set([
+  ".git",
+  "node_modules",
+  "dist",
+  "build",
+  "target",
+  ".next",
+  ".cache",
+  ".idea",
+  ".vscode",
+  "__pycache__",
+  ".turbo",
+]);
 
 /** 统一路径分隔符为 `/` */
 function normalizePath(p: string): string {
@@ -33,6 +64,75 @@ function joinPath(a: string, b: string): string {
   if (!a) return b;
   if (!b) return a;
   return `${a}/${b}`;
+}
+
+/** 依扩展名映射专属图标与色彩，极大提升文件列表可读性 */
+function getFileIconInfo(fileName: string) {
+  const ext = fileName.split(".").pop()?.toLowerCase() || "";
+  switch (ext) {
+    case "ts":
+    case "tsx":
+      return { Icon: FileCode, color: "#3178c6" }; // TS Blue
+    case "js":
+    case "jsx":
+    case "mjs":
+    case "cjs":
+      return { Icon: FileCode, color: "#e5a524" }; // JS Yellow
+    case "json":
+      return { Icon: FileJson, color: "#e06c75" }; // JSON Coral
+    case "css":
+    case "scss":
+    case "sass":
+    case "less":
+      return { Icon: FileCode2, color: "#c586c0" }; // CSS Purple
+    case "html":
+    case "htm":
+    case "xml":
+    case "svg":
+      return { Icon: FileCode, color: "#e34c26" }; // HTML Orange
+    case "md":
+    case "markdown":
+    case "txt":
+      return { Icon: FileText, color: "#58a6ff" }; // Doc Cyan
+    case "png":
+    case "jpg":
+    case "jpeg":
+    case "gif":
+    case "webp":
+    case "ico":
+    case "bmp":
+      return { Icon: FileImageIcon, color: "#a371f7" }; // Image Violet
+    case "sh":
+    case "bash":
+    case "zsh":
+    case "bat":
+    case "cmd":
+    case "ps1":
+      return { Icon: FileTerminal, color: "#3fb950" }; // Terminal Green
+    case "zip":
+    case "tar":
+    case "gz":
+    case "7z":
+    case "rar":
+      return { Icon: FileArchive, color: "#d7ba7d" }; // Archive Brown
+    case "env":
+    case "gitignore":
+    case "gitattributes":
+    case "yaml":
+    case "yml":
+    case "toml":
+    case "ini":
+    case "cfg":
+    case "conf":
+    case "lock":
+      return { Icon: FileCog, color: "#8b949e" }; // Config Gray
+    case "csv":
+    case "xlsx":
+    case "xls":
+      return { Icon: FileSpreadsheet, color: "#238636" };
+    default:
+      return { Icon: FileText, color: "var(--text-muted)" };
+  }
 }
 
 /** 递归构建目录树 —— 单个子目录扫描失败不会中断整棵树 */
@@ -135,6 +235,7 @@ function TreeNodeView({
   filter,
   selectedPath,
   onSelectFile,
+  onContextMenu,
 }: {
   node: TreeNode;
   depth: number;
@@ -144,6 +245,7 @@ function TreeNodeView({
   filter: string;
   selectedPath: string | null;
   onSelectFile: (fullPath: string, relPath: string) => void;
+  onContextMenu: (e: React.MouseEvent, node: TreeNode) => void;
 }) {
   const isExpanded = expanded.has(node.path);
   const statusInfo = node.isDirectory ? null : statusMap.get(node.path);
@@ -163,6 +265,12 @@ function TreeNodeView({
   };
 
   const isSelected = selectedPath === node.fullPath;
+  const { Icon: FileIconComponent, color: fileIconColor } = getFileIconInfo(node.name);
+
+  // 文件变更状态对应的文本颜色类名
+  const labelStatusClass = statusInfo
+    ? `status-${statusInfo.staged_status || statusInfo.unstaged_status || statusInfo.status}`
+    : "";
 
   return (
     <>
@@ -170,8 +278,19 @@ function TreeNodeView({
         className={`folder-tree-node ${isSelected ? "selected" : ""} ${node.isDirectory ? "dir" : "file"}`}
         style={indent}
         onClick={handleClick}
+        onContextMenu={(e) => onContextMenu(e, node)}
         title={node.path}
       >
+        {/* 层级对齐指引虚线 */}
+        {depth > 0 &&
+          Array.from({ length: depth }).map((_, i) => (
+            <span
+              key={i}
+              className="folder-tree-indent-guide"
+              style={{ left: `${i * 14 + 11}px` }}
+            />
+          ))}
+
         {node.isDirectory ? (
           isExpanded ? (
             <ChevronDown size={13} className="folder-tree-arrow" />
@@ -189,13 +308,16 @@ function TreeNodeView({
             <Folder size={14} className="folder-tree-icon folder-icon" />
           )
         ) : (
-          <>
-            <FileText size={14} className="folder-tree-icon file-icon" />
-            {statusInfo && <FileStatusBadge statusInfo={statusInfo} />}
-          </>
+          <FileIconComponent
+            size={14}
+            className="folder-tree-icon file-icon"
+            style={{ color: fileIconColor }}
+          />
         )}
 
-        <span className="folder-tree-label">{node.name}</span>
+        <span className={`folder-tree-label ${labelStatusClass}`}>{node.name}</span>
+
+        {!node.isDirectory && statusInfo && <FileStatusBadge statusInfo={statusInfo} />}
       </div>
 
       {node.isDirectory && isExpanded && node.children && (
@@ -211,6 +333,7 @@ function TreeNodeView({
               filter={filter}
               selectedPath={selectedPath}
               onSelectFile={onSelectFile}
+              onContextMenu={onContextMenu}
             />
           ))}
         </div>
@@ -231,6 +354,11 @@ export default function FolderTree({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    node: TreeNode;
+  } | null>(null);
   const loadedRepoRef = useRef<string | null>(null);
 
   const statusMap = useMemo(() => buildStatusMap(status), [status]);
@@ -271,6 +399,33 @@ export default function FolderTree({
     lastRefreshKeyRef.current = refreshKey;
     loadTree(true);
   }, [refreshKey, loadTree]);
+
+  // 全局关闭右键菜单
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handleClick = () => setContextMenu(null);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setContextMenu(null);
+    };
+    window.addEventListener("click", handleClick);
+    window.addEventListener("contextmenu", handleClick);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("click", handleClick);
+      window.removeEventListener("contextmenu", handleClick);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [contextMenu]);
+
+  const handleContextMenu = useCallback((e: React.MouseEvent, node: TreeNode) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({
+      x: Math.min(e.clientX, window.innerWidth - 240),
+      y: Math.min(e.clientY, window.innerHeight - 200),
+      node,
+    });
+  }, []);
 
   const handleToggle = useCallback((path: string) => {
     setExpanded((prev) => {
@@ -343,22 +498,80 @@ export default function FolderTree({
 
   return (
     <div className="folder-tree">
-      {tree && tree.map((node) => (
-        <TreeNodeView
-          key={node.path}
-          node={node}
-          depth={0}
-          expanded={expanded}
-          onToggle={handleToggle}
-          statusMap={statusMap}
-          filter={filter}
-          selectedPath={selectedPath}
-          onSelectFile={onSelectFile}
-        />
-      ))}
+      {tree &&
+        tree.map((node) => (
+          <TreeNodeView
+            key={node.path}
+            node={node}
+            depth={0}
+            expanded={expanded}
+            onToggle={handleToggle}
+            statusMap={statusMap}
+            filter={filter}
+            selectedPath={selectedPath}
+            onSelectFile={onSelectFile}
+            onContextMenu={handleContextMenu}
+          />
+        ))}
       {tree && tree.length === 0 && !hasFilter && (
         <div className="folder-tree-empty">
           <span>目录为空</span>
+        </div>
+      )}
+
+      {contextMenu && (
+        <div
+          className="context-menu"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="context-menu-title" title={contextMenu.node.path}>
+            {contextMenu.node.name}
+          </div>
+          <button
+            type="button"
+            className="context-menu-item"
+            onClick={() => {
+              openPath(contextMenu.node.fullPath, "editor").catch(() => {});
+              setContextMenu(null);
+            }}
+          >
+            <ExternalLink size={13} />
+            <span>用外部编辑器打开</span>
+          </button>
+          <button
+            type="button"
+            className="context-menu-item"
+            onClick={() => {
+              openPath(contextMenu.node.fullPath, "explorer").catch(() => {});
+              setContextMenu(null);
+            }}
+          >
+            <FolderOpen size={13} />
+            <span>在文件资源管理器中定位</span>
+          </button>
+          <button
+            type="button"
+            className="context-menu-item"
+            onClick={() => {
+              navigator.clipboard?.writeText(contextMenu.node.path);
+              setContextMenu(null);
+            }}
+          >
+            <Copy size={13} />
+            <span>复制相对路径</span>
+          </button>
+          <button
+            type="button"
+            className="context-menu-item"
+            onClick={() => {
+              navigator.clipboard?.writeText(contextMenu.node.fullPath);
+              setContextMenu(null);
+            }}
+          >
+            <Copy size={13} />
+            <span>复制绝对路径</span>
+          </button>
         </div>
       )}
     </div>

@@ -2,22 +2,28 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
-  Folder,
+  FolderGit2,
+  FolderOpen,
+  GitBranch,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
   Search,
   X,
+  ExternalLink,
+  Copy,
+  Trash2,
 } from "lucide-react";
 import FolderTree from "./FolderTree";
 import RepoAvatar from "./RepoAvatar";
-import { getRepoChangeCount } from "../api/tauri";
+import { getRepoChangeCount, openPath } from "../api/tauri";
 import type { GitStatus, RecentRepo } from "../types";
 
 /** 单个项目节点：标题行可切换仓库，箭头展开复用「文件夹」tab 的目录树 */
 function ProjectNode({
   repo,
   active,
+  currentBranch,
   filter,
   status,
   selectedPath,
@@ -26,9 +32,11 @@ function ProjectNode({
   onSwitchRepo,
   onOpenFile,
   onRemove,
+  onContextMenu,
 }: {
   repo: RecentRepo;
   active: boolean;
+  currentBranch?: string;
   filter: string;
   status: GitStatus | null;
   selectedPath: string | null;
@@ -37,8 +45,11 @@ function ProjectNode({
   onSwitchRepo: (path: string) => void;
   onOpenFile: (repoPath: string, fullPath: string, relPath: string) => void;
   onRemove: (path: string) => void;
+  onContextMenu: (e: React.MouseEvent, repo: RecentRepo) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  // 当有搜索词且当前项目为激活项目时，自动展开以便显示搜索结果
+  const isExpanded = expanded || (Boolean(filter.trim()) && active);
 
   const toggle = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -46,15 +57,36 @@ function ProjectNode({
   };
 
   return (
-    <div className={`project-node ${active ? "active" : ""}`}>
-      <div className="project-node-row" onClick={() => onSwitchRepo(repo.path)} title={repo.path}>
-        <button type="button" className="project-node-toggle" onClick={toggle}>
-          {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+    <div className="project-node">
+      <div
+        className={`project-node-row ${active ? "active" : ""}`}
+        onClick={() => onSwitchRepo(repo.path)}
+        onContextMenu={(e) => onContextMenu(e, repo)}
+        title={repo.path}
+      >
+        <button
+          type="button"
+          className="project-node-toggle"
+          onClick={toggle}
+          title={isExpanded ? "收起目录" : "展开目录"}
+        >
+          {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         </button>
-        <Folder size={14} className="project-node-icon" />
+        <FolderGit2
+          size={14}
+          className={`project-node-icon ${active ? "active-repo" : ""}`}
+        />
         <span className="project-node-name">{repo.name}</span>
+        {active && currentBranch && (
+          <span className="project-node-branch" title={`当前分支: ${currentBranch}`}>
+            <GitBranch size={10} />
+            <span>{currentBranch}</span>
+          </span>
+        )}
         {changeCount !== null && changeCount > 0 && (
-          <span className="project-node-count">{changeCount}</span>
+          <span className="project-node-count" title={`${changeCount} 处变更`}>
+            {changeCount}
+          </span>
         )}
         <button
           type="button"
@@ -69,7 +101,7 @@ function ProjectNode({
         </button>
       </div>
 
-      {expanded && (
+      {isExpanded && (
         <div className="project-node-children">
           <FolderTree
             repoPath={repo.path}
@@ -88,6 +120,7 @@ function ProjectNode({
 export default function ProjectSidebar({
   repos,
   currentRepoPath,
+  currentBranch,
   status,
   selectedPath,
   refreshKey,
@@ -100,6 +133,7 @@ export default function ProjectSidebar({
 }: {
   repos: RecentRepo[];
   currentRepoPath: string;
+  currentBranch?: string;
   status: GitStatus | null;
   selectedPath: string | null;
   refreshKey: number;
@@ -115,18 +149,54 @@ export default function ProjectSidebar({
   const [collapsed, setCollapsed] = useState(false);
   const [query, setQuery] = useState("");
   const [counts, setCounts] = useState<Record<string, number>>({});
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    repo: RecentRepo;
+  } | null>(null);
 
   useEffect(() => {
     onCollapsedChange?.(collapsed);
   }, [collapsed, onCollapsedChange]);
 
+  // 全局点击或 ESC 关闭右键菜单
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handleClick = () => setContextMenu(null);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setContextMenu(null);
+    };
+    window.addEventListener("click", handleClick);
+    window.addEventListener("contextmenu", handleClick);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("click", handleClick);
+      window.removeEventListener("contextmenu", handleClick);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [contextMenu]);
+
+  const handleContextMenu = (e: React.MouseEvent, repo: RecentRepo) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({
+      x: Math.min(e.clientX, window.innerWidth - 240),
+      y: Math.min(e.clientY, window.innerHeight - 200),
+      repo,
+    });
+  };
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return repos;
     return repos.filter(
-      (r) => r.name.toLowerCase().includes(q) || r.path.toLowerCase().includes(q)
+      (r) =>
+        r.name.toLowerCase().includes(q) ||
+        r.path.toLowerCase().includes(q) ||
+        // 保持当前激活仓库始终可见，以便子文件树可根据 query 匹配并高亮展示文件
+        r.path === currentRepoPath
     );
-  }, [repos, query]);
+  }, [repos, query, currentRepoPath]);
 
   const list = useMemo(() => {
     // 当前项目尚未写入最近列表时也显示出来
@@ -212,7 +282,7 @@ export default function ProjectSidebar({
   if (collapsed) {
     return (
       <div className="project-sidebar collapsed">
-        <div className="project-sidebar-header">
+        <div className="project-sidebar-header" data-tauri-drag-region>
           <button
             type="button"
             className="project-sidebar-collapse"
@@ -223,29 +293,117 @@ export default function ProjectSidebar({
           </button>
         </div>
         <div className="project-rail">
-          {orderedList.map((repo) => (
-            <button
-              key={repo.path}
-              type="button"
-              className={`project-rail-item ${repo.path === currentRepoPath ? "active" : ""}`}
-              title={repo.name}
-              onClick={() => onSwitchRepo(repo.path)}
-            >
-              <RepoAvatar
-                repoName={repo.name}
-                index={avatarIndexByPath.get(repo.path) ?? null}
-                size={24}
-              />
-            </button>
-          ))}
+          {orderedList.map((repo) => {
+            const count =
+              repo.path === currentRepoPath
+                ? currentCount ?? counts[repo.path] ?? null
+                : counts[repo.path] ?? null;
+            const tooltip =
+              count && count > 0
+                ? `${repo.name} (${count} 处变更)\n${repo.path}`
+                : `${repo.name}\n${repo.path}`;
+
+            return (
+              <div
+                key={repo.path}
+                className="project-rail-item-wrap"
+                onContextMenu={(e) => handleContextMenu(e, repo)}
+              >
+                <button
+                  type="button"
+                  className={`project-rail-item ${repo.path === currentRepoPath ? "active" : ""}`}
+                  title={tooltip}
+                  onClick={() => onSwitchRepo(repo.path)}
+                >
+                  <RepoAvatar
+                    repoName={repo.name}
+                    index={avatarIndexByPath.get(repo.path) ?? null}
+                    size={24}
+                  />
+                  {count !== null && count > 0 && (
+                    <span className="project-rail-badge">
+                      {count > 99 ? "99+" : count}
+                    </span>
+                  )}
+                </button>
+              </div>
+            );
+          })}
+
+          <button
+            type="button"
+            className="project-rail-add"
+            title="打开其他仓库..."
+            onClick={onOpenOther}
+          >
+            <Plus size={13} />
+          </button>
         </div>
+
+        {contextMenu && (
+          <div
+            className="context-menu"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="context-menu-title" title={contextMenu.repo.path}>
+              {contextMenu.repo.name}
+            </div>
+            <button
+              type="button"
+              className="context-menu-item"
+              onClick={() => {
+                openPath(contextMenu.repo.path, "explorer").catch(() => {});
+                setContextMenu(null);
+              }}
+            >
+              <FolderOpen size={13} />
+              <span>在文件资源管理器中打开</span>
+            </button>
+            <button
+              type="button"
+              className="context-menu-item"
+              onClick={() => {
+                openPath(contextMenu.repo.path, "editor").catch(() => {});
+                setContextMenu(null);
+              }}
+            >
+              <ExternalLink size={13} />
+              <span>用外部编辑器打开</span>
+            </button>
+            <button
+              type="button"
+              className="context-menu-item"
+              onClick={() => {
+                navigator.clipboard?.writeText(contextMenu.repo.path);
+                setContextMenu(null);
+              }}
+            >
+              <Copy size={13} />
+              <span>复制仓库绝对路径</span>
+            </button>
+            <div className="context-menu-hint" />
+            <button
+              type="button"
+              className="context-menu-item"
+              style={{ color: "var(--error-color)" }}
+              onClick={() => {
+                onRemove(contextMenu.repo.path);
+                setContextMenu(null);
+              }}
+            >
+              <Trash2 size={13} />
+              <span>从最近列表移除</span>
+            </button>
+          </div>
+        )}
       </div>
     );
   }
 
   return (
     <div className="project-sidebar" style={width !== undefined ? { width } : undefined}>
-      <div className="project-sidebar-header">
+      <div className="project-sidebar-header" data-tauri-drag-region>
         <img className="project-sidebar-logo" src="/app-icon.png" alt="GitLensy" draggable={false} />
         <span className="project-sidebar-title">GitLensy</span>
         <button
@@ -267,6 +425,16 @@ export default function ProjectSidebar({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
+        {query && (
+          <button
+            type="button"
+            className="project-sidebar-search-clear"
+            onClick={() => setQuery("")}
+            title="清空搜索"
+          >
+            <X size={12} />
+          </button>
+        )}
       </div>
 
       <div className="project-sidebar-list">
@@ -275,6 +443,7 @@ export default function ProjectSidebar({
             key={repo.path}
             repo={repo}
             active={repo.path === currentRepoPath}
+            currentBranch={repo.path === currentRepoPath ? currentBranch : undefined}
             filter={query}
             status={status}
             selectedPath={selectedPath}
@@ -285,6 +454,7 @@ export default function ProjectSidebar({
             onSwitchRepo={onSwitchRepo}
             onOpenFile={onOpenFile}
             onRemove={onRemove}
+            onContextMenu={handleContextMenu}
           />
         ))}
         {orderedList.length === 0 && <div className="project-tree-loading">没有匹配的项目</div>}
@@ -294,6 +464,64 @@ export default function ProjectSidebar({
         <Plus size={13} />
         <span>打开其他仓库...</span>
       </button>
+
+      {contextMenu && (
+        <div
+          className="context-menu"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="context-menu-title" title={contextMenu.repo.path}>
+            {contextMenu.repo.name}
+          </div>
+          <button
+            type="button"
+            className="context-menu-item"
+            onClick={() => {
+              openPath(contextMenu.repo.path, "explorer").catch(() => {});
+              setContextMenu(null);
+            }}
+          >
+            <FolderOpen size={13} />
+            <span>在文件资源管理器中打开</span>
+          </button>
+          <button
+            type="button"
+            className="context-menu-item"
+            onClick={() => {
+              openPath(contextMenu.repo.path, "editor").catch(() => {});
+              setContextMenu(null);
+            }}
+          >
+            <ExternalLink size={13} />
+            <span>用外部编辑器打开</span>
+          </button>
+          <button
+            type="button"
+            className="context-menu-item"
+            onClick={() => {
+              navigator.clipboard?.writeText(contextMenu.repo.path);
+              setContextMenu(null);
+            }}
+          >
+            <Copy size={13} />
+            <span>复制仓库绝对路径</span>
+          </button>
+          <div className="context-menu-hint" />
+          <button
+            type="button"
+            className="context-menu-item"
+            style={{ color: "var(--error-color)" }}
+            onClick={() => {
+              onRemove(contextMenu.repo.path);
+              setContextMenu(null);
+            }}
+          >
+            <Trash2 size={13} />
+            <span>从最近列表移除</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }

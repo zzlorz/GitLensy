@@ -31,8 +31,8 @@ export default function RepoAvatar({ repoName, index = null, size = 18 }: Props)
     return { letter, color };
   }, [repoName]);
 
-  // 字号：根据尺寸自适应
-  const fontSize = Math.max(8, Math.floor(size * 0.8));
+  // 字号：根据尺寸自适应（保持单字母完美居中显示）
+  const fontSize = Math.max(9, Math.floor(size * 0.48));
   const radius = Math.max(3, Math.floor(size * 0.25));
 
   return (
