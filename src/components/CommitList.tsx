@@ -3,13 +3,11 @@ import type { ReactNode } from "react";
 import {
   ChevronDown,
   ChevronRight,
-  FileCode2,
   GitCommit,
   GitCompare,
   GitBranch,
   Tag,
   GitPullRequest,
-  CheckCircle2,
   Copy,
   Loader2,
 } from "lucide-react";
@@ -24,6 +22,10 @@ interface Props {
   onLoadMore: () => void;
   /** 当前未提交变更涉及的文件数 */
   uncommittedCount: number;
+  /** 已暂存文件数 */
+  stagedCount?: number;
+  /** 未暂存文件数 */
+  unstagedCount?: number;
   /** 是否选中并展开「未提交的变更」 */
   uncommittedSelected: boolean;
   onSelectUncommitted: () => void;
@@ -306,6 +308,8 @@ export default function CommitList({
   onSelect,
   onLoadMore,
   uncommittedCount,
+  stagedCount = 0,
+  unstagedCount = 0,
   uncommittedSelected,
   onSelectUncommitted,
   uncommittedContent,
@@ -377,6 +381,12 @@ export default function CommitList({
     return Math.min(maxLane + 1, MAX_LANES) * LANE_WIDTH + 4;
   }, [rows]);
 
+  // 获取首个提交 HEAD 所在车道与坐标，用于绘制未提交变更的平滑虚线接驳
+  const headLane = rows[0]?.lane ?? 0;
+  const headNodeX = laneX(headLane);
+  const headColor = laneColor(headLane);
+  const uncommittedNodeY = ROW_HEIGHT / 2;
+
   return (
     <div className="commit-list">
       {/* 未提交的变更：始终作为最新一条记录显示在历史最上方 */}
@@ -387,27 +397,108 @@ export default function CommitList({
         onClick={onSelectUncommitted}
         title={
           uncommittedCount > 0
-            ? `工作区存在 ${uncommittedCount} 处未提交变更`
+            ? `工作区存在 ${uncommittedCount} 处变更 (已暂存: ${stagedCount}, 未暂存: ${unstagedCount})`
             : "工作区干净，无未提交变更"
         }
       >
         <div className="commit-item-graph commit-uncommitted-graph" style={{ width: graphWidth }}>
-          {uncommittedCount > 0 ? (
-            <FileCode2 size={15} className="uncommitted-icon-dirty" />
-          ) : (
-            <CheckCircle2 size={15} className="uncommitted-icon-clean" />
-          )}
+          <svg width={graphWidth} height={ROW_HEIGHT} className="commit-graph-svg">
+            {/* 贯穿其他通过本行的分支通道（如有） */}
+            {rows[0]?.pass.map((lane) => (
+              <line
+                key={`uncommitted-pass-${lane}`}
+                x1={laneX(lane)}
+                y1={0}
+                x2={laneX(lane)}
+                y2={ROW_HEIGHT}
+                stroke={laneColor(lane)}
+                strokeWidth={1.6}
+                opacity={0.35}
+              />
+            ))}
+
+            {/* 向下连接到最新一条 HEAD 提交的垂直虚线 */}
+            {commits.length > 0 && (
+              <line
+                x1={headNodeX}
+                y1={uncommittedNodeY + 5}
+                x2={headNodeX}
+                y2={ROW_HEIGHT}
+                stroke={uncommittedCount > 0 ? "var(--modified-color)" : headColor}
+                strokeWidth={1.8}
+                strokeDasharray="3 3"
+                opacity={uncommittedCount > 0 ? 0.95 : 0.6}
+              />
+            )}
+
+            {/* 未提交节点：有改动时为虚线光环+实心圆点，无改动时为分支空心圆 */}
+            {uncommittedCount > 0 ? (
+              <>
+                <circle
+                  cx={headNodeX}
+                  cy={uncommittedNodeY}
+                  r={6.5}
+                  fill="none"
+                  stroke="var(--modified-color)"
+                  strokeWidth={1.5}
+                  strokeDasharray="2.5 2.5"
+                />
+                <circle
+                  cx={headNodeX}
+                  cy={uncommittedNodeY}
+                  r={3}
+                  fill="var(--modified-color)"
+                />
+              </>
+            ) : (
+              <circle
+                cx={headNodeX}
+                cy={uncommittedNodeY}
+                r={4}
+                fill="var(--bg-primary)"
+                stroke="var(--text-muted)"
+                strokeWidth={1.6}
+                opacity={0.65}
+              />
+            )}
+          </svg>
         </div>
+
         <div className="commit-item-content">
           <div className="commit-subject uncommitted-subject">
-            <span>未提交的变更</span>
+            <span className="uncommitted-title">未提交的变更</span>
             {uncommittedCount > 0 && <span className="uncommitted-badge">{uncommittedCount}</span>}
           </div>
           <div className="commit-meta">
-            <span className={`commit-uncommitted-count ${uncommittedCount > 0 ? "dirty" : "clean"}`}>
-              {uncommittedCount > 0 ? `${uncommittedCount} 个文件修改` : "工作区干净 (Clean)"}
-            </span>
-            <span className="commit-uncommitted-hint">工作区 / 暂存区</span>
+            {uncommittedCount > 0 ? (
+              <div className="uncommitted-meta-chips">
+                {stagedCount > 0 && (
+                  <span
+                    className="uncommitted-meta-chip staged"
+                    title={`${stagedCount} 个文件已暂存，可随时提交`}
+                  >
+                    <span className="uncommitted-chip-dot staged" />
+                    <span>{stagedCount} 暂存</span>
+                  </span>
+                )}
+                {unstagedCount > 0 && (
+                  <span
+                    className="uncommitted-meta-chip unstaged"
+                    title={`${unstagedCount} 个文件未暂存`}
+                  >
+                    <span className="uncommitted-chip-dot unstaged" />
+                    <span>{unstagedCount} 未暂存</span>
+                  </span>
+                )}
+                {stagedCount === 0 && unstagedCount === 0 && (
+                  <span className="commit-uncommitted-count dirty">
+                    {uncommittedCount} 个文件修改
+                  </span>
+                )}
+              </div>
+            ) : (
+              <span className="commit-uncommitted-clean-text">工作区干净 (Clean)</span>
+            )}
           </div>
         </div>
         <span className="commit-uncommitted-chevron">

@@ -3,12 +3,17 @@ import {
   ArrowRight,
   ChevronDown,
   ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
   Clock,
+  Copy,
+  Check,
   GitCommit,
   GitCommitHorizontal,
   GitCompare,
   Loader2,
   User,
+  WrapText,
   X,
 } from "lucide-react";
 import {
@@ -57,6 +62,9 @@ export default function CommitChangesView({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [collapsedKeys, setCollapsedKeys] = useState<Set<string>>(new Set());
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [wrap, setWrap] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -119,6 +127,32 @@ export default function CommitChangesView({
   const changeLayout = (next: DiffLayout) => {
     setLayout(next);
     saveDiffLayout(next);
+  };
+
+  const toggleCollapse = (path: string) => {
+    setCollapsedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  };
+
+  const allCollapsed = files.length > 0 && collapsedKeys.size === files.length;
+
+  const toggleAllCollapse = () => {
+    if (allCollapsed) {
+      setCollapsedKeys(new Set());
+    } else {
+      setCollapsedKeys(new Set(files.map((f) => f.path)));
+    }
+  };
+
+  const handleCopyPath = (e: React.MouseEvent, path: string) => {
+    e.stopPropagation();
+    navigator.clipboard?.writeText(path);
+    setCopiedKey(path);
+    setTimeout(() => setCopiedKey(null), 1500);
   };
 
   return (
@@ -208,23 +242,48 @@ export default function CommitChangesView({
           {compareFrom ? "两个提交之间的变更" : "本次提交的变更"}
           <span className="all-changes-count">{files.length}</span>
         </span>
-        <div className="diff-view-toggle">
+
+        <div className="all-changes-toolbar-actions">
+          {files.length > 0 && (
+            <button
+              type="button"
+              className="all-changes-tool-btn"
+              onClick={toggleAllCollapse}
+              title={allCollapsed ? "展开所有文件 Diff" : "折叠所有文件 Diff"}
+            >
+              {allCollapsed ? <ChevronsUpDown size={13} /> : <ChevronsDownUp size={13} />}
+              <span>{allCollapsed ? "全部展开" : "全部折叠"}</span>
+            </button>
+          )}
+
           <button
             type="button"
-            className={`diff-view-btn ${layout === "unified" ? "active" : ""}`}
-            onClick={() => changeLayout("unified")}
-            title="统一视图：增删行上下排列"
+            className={`all-changes-tool-btn ${wrap ? "active" : ""}`}
+            onClick={() => setWrap((w) => !w)}
+            title={wrap ? "取消自动换行" : "开启自动换行"}
           >
-            统一
+            <WrapText size={13} />
+            <span>换行</span>
           </button>
-          <button
-            type="button"
-            className={`diff-view-btn ${layout === "split" ? "active" : ""}`}
-            onClick={() => changeLayout("split")}
-            title="双栏视图：原版本与新版本左右对比"
-          >
-            双栏
-          </button>
+
+          <div className="diff-view-toggle">
+            <button
+              type="button"
+              className={`diff-view-btn ${layout === "unified" ? "active" : ""}`}
+              onClick={() => changeLayout("unified")}
+              title="统一视图：增删行上下排列"
+            >
+              统一
+            </button>
+            <button
+              type="button"
+              className={`diff-view-btn ${layout === "split" ? "active" : ""}`}
+              onClick={() => changeLayout("split")}
+              title="双栏视图：原版本与新版本左右对比"
+            >
+              双栏
+            </button>
+          </div>
         </div>
       </div>
 
@@ -250,9 +309,19 @@ export default function CommitChangesView({
           !loadError &&
           files.map((file) => {
             const badge = BADGES[file.status] ?? BADGES.modified;
+            const isCollapsed = collapsedKeys.has(file.path);
+
             return (
               <section className="all-diff-file" key={file.path}>
-                <div className="all-diff-file-header">
+                <div
+                  className={`all-diff-file-header ${isCollapsed ? "collapsed" : ""}`}
+                  onClick={() => toggleCollapse(file.path)}
+                  title="点击折叠 / 展开此文件 Diff"
+                >
+                  <ChevronDown
+                    size={14}
+                    className={`all-diff-file-chevron ${isCollapsed ? "collapsed" : ""}`}
+                  />
                   <span className={`file-badge ${badge.className}`}>{badge.text}</span>
                   {file.old_path && file.old_path !== file.path && (
                     <>
@@ -265,6 +334,18 @@ export default function CommitChangesView({
                   <span className="all-diff-file-path" title={file.path}>
                     {file.path}
                   </span>
+                  <button
+                    type="button"
+                    className="all-diff-copy-btn"
+                    onClick={(e) => handleCopyPath(e, file.path)}
+                    title={copiedKey === file.path ? "已复制！" : "复制文件路径"}
+                  >
+                    {copiedKey === file.path ? (
+                      <Check size={11} style={{ color: "var(--added-color)" }} />
+                    ) : (
+                      <Copy size={11} />
+                    )}
+                  </button>
                   <span className="all-diff-file-stats">
                     {file.additions > 0 && (
                       <span className="stat-additions">+{file.additions}</span>
@@ -275,11 +356,17 @@ export default function CommitChangesView({
                   </span>
                 </div>
 
-                {errors[file.path] ? (
-                  <div className="all-diff-error">获取 Diff 失败：{errors[file.path]}</div>
-                ) : diffs[file.path] ? (
-                  <DiffBody diff={diffs[file.path]} layout={layout} filePath={file.path} />
-                ) : null}
+                {!isCollapsed &&
+                  (errors[file.path] ? (
+                    <div className="all-diff-error">获取 Diff 失败：{errors[file.path]}</div>
+                  ) : diffs[file.path] ? (
+                    <DiffBody
+                      diff={diffs[file.path]}
+                      layout={layout}
+                      filePath={file.path}
+                      wrap={wrap}
+                    />
+                  ) : null)}
               </section>
             );
           })}

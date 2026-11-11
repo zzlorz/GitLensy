@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { listen } from "@tauri-apps/api/event";
 import {
   GitBranch, RotateCw, FolderSync, Terminal, MoreHorizontal, Tag, Archive, ArchiveRestore, Trash2,
-  FileCode2, AlertTriangle, Loader2, GitCommit, Diff, Search, Settings, X,
+  FileCode2, AlertTriangle, Loader2, GitCommit, Search, Settings, X,
   Download, Upload, ChevronDown, Check, ExternalLink, Plus, Undo2,
   Pencil, GitMerge, GitCompare, RotateCcw, Copy,
 } from "lucide-react";
@@ -1784,6 +1784,8 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
             onSelect={handleSelectCommit}
             onLoadMore={loadMoreCommits}
             uncommittedCount={changesCount}
+            stagedCount={status?.staged.length ?? 0}
+            unstagedCount={status?.unstaged.length ?? 0}
             uncommittedSelected={showUncommitted}
             onSelectUncommitted={handleSelectUncommitted}
             compareBaseHash={compareFrom?.hash ?? null}
@@ -2034,20 +2036,11 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
 
                         {selectedFile && rightPanelMode === "file" && (
                           <div className="changes-file-preview">
-                            <div className="changes-file-preview-bar">
-                              <button
-                                type="button"
-                                className="changes-file-preview-switch"
-                                onClick={() => setRightPanelMode("diff")}
-                              >
-                                <Diff size={13} />
-                                <span>查看变更对比</span>
-                              </button>
-                            </div>
                             <FilePreview
                               fullPath={selectedFileFullPath}
                               relPath={selectedFile.path}
                               change={selectedFile}
+                              onSwitchToDiff={() => setRightPanelMode("diff")}
                             />
                           </div>
                         )}
@@ -2106,6 +2099,7 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
                               view={diffView}
                               onViewChange={setDiffView}
                               repoPath={repo.path}
+                              onSwitchToFile={() => setRightPanelMode("file")}
                             />
                           )}
                       </div>
@@ -2165,24 +2159,20 @@ export default function MainWorkspace({ repo, onCloseRepo, onRepoUpdate, onOpenS
 
         {selectedFolderFile && (
           <div className="diff-viewer">
-            <div className="changes-file-preview-bar">
-              <span className="preview-file-path" title={selectedFolderFile.relPath}>
-                {selectedFolderFile.relPath}
-              </span>
-              <button
-                type="button"
-                className="changes-file-preview-switch"
-                onClick={() => setSelectedFolderFile(null)}
-                title="关闭预览"
-              >
-                <X size={13} />
-                <span>关闭</span>
-              </button>
-            </div>
             <FilePreview
               fullPath={selectedFolderFile.fullPath}
               relPath={selectedFolderFile.relPath}
               change={selectedFolderChange}
+              onClose={() => setSelectedFolderFile(null)}
+              onSwitchToDiff={
+                selectedFolderChange
+                  ? () => {
+                      setSelectedFile(selectedFolderChange);
+                      setSelectedFolderFile(null);
+                      setRightPanelMode("diff");
+                    }
+                  : undefined
+              }
             />
           </div>
         )}

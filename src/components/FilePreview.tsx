@@ -1,6 +1,20 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { readTextFile, readFile, stat } from "@tauri-apps/plugin-fs";
-import { FileText, Image, Loader2, AlertTriangle, FileQuestion, X, ExternalLink } from "lucide-react";
+import {
+  FileText,
+  Image as ImageIcon,
+  Loader2,
+  AlertTriangle,
+  FileQuestion,
+  X,
+  ExternalLink,
+  Copy,
+  Check,
+  Diff,
+  WrapText,
+  Maximize2,
+  Minimize2,
+} from "lucide-react";
 import { getFileDiff, openInEditor } from "../api/tauri";
 import type { ChangedFile, DiffView, FileDiff } from "../types";
 import { ensureHighlightTheme, getExtension, highlightCode } from "../lib/highlight";
@@ -10,6 +24,10 @@ interface Props {
   relPath: string;
   /** 该文件在 Git 中的变更信息；为 null 表示没有变更，不标注 */
   change?: ChangedFile | null;
+  /** 关闭预览回调（在文件夹树文件预览时提供） */
+  onClose?: () => void;
+  /** 切换到变更对比模式（当文件存在 Git 变更时提供） */
+  onSwitchToDiff?: () => void;
 }
 
 // 文本文件扩展名（有高亮或需要纯文本展示）
@@ -118,18 +136,29 @@ function splitHighlightedLines(html: string): string[] {
   return lines;
 }
 
-export default function FilePreview({ fullPath, relPath, change }: Props) {
+export default function FilePreview({
+  fullPath,
+  relPath,
+  change,
+  onClose,
+  onSwitchToDiff,
+}: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fileSize, setFileSize] = useState<number>(0);
   const [content, setContent] = useState<string | null>(null);       // 原始文本
   const [highlighted, setHighlighted] = useState<string | null>(null); // 高亮后 HTML
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [imageDimensions, setImageDimensions] = useState<{ w: number; h: number } | null>(null);
+  const [imageZoom, setImageZoom] = useState<"fit" | "original">("fit");
   const [isTruncated, setIsTruncated] = useState(false);
   const [highlightLang, setHighlightLang] = useState<string | null>(null);
   const [fileType, setFileType] = useState<"text" | "image" | "binary" | "unknown">("unknown");
   const [changeMap, setChangeMap] = useState<ChangeMap>({ blocks: [], lineToBlock: new Map() });
   const [popover, setPopover] = useState<{ block: ChangeBlock; x: number; y: number } | null>(null);
+  const [copiedPath, setCopiedPath] = useState(false);
+  const [copiedContent, setCopiedContent] = useState(false);
+  const [wrapLines, setWrapLines] = useState(false);
   const objectUrlRef = useRef<string | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
 
@@ -214,6 +243,8 @@ export default function FilePreview({ fullPath, relPath, change }: Props) {
       setError(null);
       setContent(null);
       setImageUrl(null);
+      setImageDimensions(null);
+      setImageZoom("fit");
       setIsTruncated(false);
 
       if (objectUrlRef.current) {
@@ -289,6 +320,19 @@ export default function FilePreview({ fullPath, relPath, change }: Props) {
     setPopover({ block, x: e.clientX, y: e.clientY });
   };
 
+  const handleCopyPath = () => {
+    navigator.clipboard?.writeText(relPath);
+    setCopiedPath(true);
+    setTimeout(() => setCopiedPath(false), 1500);
+  };
+
+  const handleCopyContent = () => {
+    if (content === null) return;
+    navigator.clipboard?.writeText(content);
+    setCopiedContent(true);
+    setTimeout(() => setCopiedContent(false), 1500);
+  };
+
   if (loading) {
     return (
       <div className="empty-state">
@@ -320,35 +364,98 @@ export default function FilePreview({ fullPath, relPath, change }: Props) {
 
   return (
     <div className="file-preview">
-      {/* 文件头 */}
+      {/* 统一单层文件头 */}
       <div className="file-preview-header">
         <div className="file-preview-header-path" title={relPath}>
           {fileType === "image" ? (
-            <Image size={14} />
+            <ImageIcon size={14} className="file-preview-type-icon" />
           ) : fileType === "text" ? (
-            <FileText size={14} />
+            <FileText size={14} className="file-preview-type-icon" />
           ) : (
-            <FileQuestion size={14} />
+            <FileQuestion size={14} className="file-preview-type-icon" />
           )}
-          <span>{relPath}</span>
+          <span className="file-preview-path-text">{relPath}</span>
+          <button
+            type="button"
+            className="file-preview-copy-btn"
+            onClick={handleCopyPath}
+            title={copiedPath ? "已复制文件路径！" : "复制相对路径"}
+          >
+            {copiedPath ? <Check size={12} style={{ color: "var(--added-color)" }} /> : <Copy size={12} />}
+          </button>
         </div>
+
         <div className="file-preview-header-meta">
+          {onSwitchToDiff && (
+            <button
+              type="button"
+              className="file-preview-switch-btn"
+              onClick={onSwitchToDiff}
+              title="切换到变更对比视图"
+            >
+              <Diff size={12} />
+              <span>变更对比</span>
+            </button>
+          )}
+
           {highlightLang && fileType === "text" && (
             <span className="file-preview-meta-item">
               {highlightLang}
             </span>
           )}
+
+          {fileType === "image" && imageDimensions && (
+            <span className="file-preview-meta-item">
+              {imageDimensions.w} × {imageDimensions.h} px
+            </span>
+          )}
+
+          {fileType === "image" && (
+            <button
+              type="button"
+              className={`file-preview-action ${imageZoom === "original" ? "active" : ""}`}
+              onClick={() => setImageZoom((z) => (z === "fit" ? "original" : "fit"))}
+              title={imageZoom === "fit" ? "当前自适应窗口，点击切换至 1:1 原始尺寸" : "当前原始尺寸，点击自适应窗口"}
+            >
+              {imageZoom === "fit" ? <Maximize2 size={13} /> : <Minimize2 size={13} />}
+            </button>
+          )}
+
           {fileSize > 0 && <span className="file-preview-meta-item">{formatSize(fileSize)}</span>}
+
           {hasChanges && (
-            <span className="file-preview-meta-item file-preview-change-count">
+            <span className="file-preview-meta-item file-preview-change-count" title="该文件在工作区或暂存区中有变更">
               {changeMap.lineToBlock.size} 行变更
             </span>
           )}
+
           {isTruncated && <span className="file-preview-truncated-badge">已截断 (仅前 512KB)</span>}
+
+          {fileType === "text" && (
+            <>
+              <button
+                type="button"
+                className={`file-preview-action ${wrapLines ? "active" : ""}`}
+                onClick={() => setWrapLines((w) => !w)}
+                title={wrapLines ? "取消换行（单行横向滚动）" : "自动换行"}
+              >
+                <WrapText size={13} />
+              </button>
+              <button
+                type="button"
+                className="file-preview-action"
+                onClick={handleCopyContent}
+                title={copiedContent ? "已复制全文！" : "复制代码全文"}
+              >
+                {copiedContent ? <Check size={13} style={{ color: "var(--added-color)" }} /> : <Copy size={13} />}
+              </button>
+            </>
+          )}
+
           <button
             type="button"
             className="file-preview-action"
-            title="在编辑器中打开文件"
+            title="在外部编辑器中打开文件"
             onClick={() =>
               openInEditor(fullPath).catch((err) =>
                 window.alert(err instanceof Error ? err.message : String(err))
@@ -357,10 +464,21 @@ export default function FilePreview({ fullPath, relPath, change }: Props) {
           >
             <ExternalLink size={13} />
           </button>
+
+          {onClose && (
+            <button
+              type="button"
+              className="file-preview-close-btn"
+              onClick={onClose}
+              title="关闭预览"
+            >
+              <X size={14} />
+            </button>
+          )}
         </div>
       </div>
 
-      {/* 内容 */}
+      {/* 内容主体 */}
       <div className="file-preview-body">
         {error && fileType !== "unknown" && (
           <div className="file-preview-read-error">
@@ -370,39 +488,50 @@ export default function FilePreview({ fullPath, relPath, change }: Props) {
         )}
 
         {fileType === "text" && highlighted !== null && (
-          hasChanges ? (
-            <pre className="file-preview-text file-preview-text-lines hljs" style={{ margin: 0, padding: "16px" }} onScroll={() => setPopover(null)}>
-              <code>
-                {highlightedLines.map((lineHtml, i) => {
-                  const lineNo = i + 1;
-                  const blockIndex = changeMap.lineToBlock.get(lineNo);
-                  const isChanged = blockIndex !== undefined;
-                  const isModified = isChanged && changeMap.blocks[blockIndex].hasOld;
-                  const className = isChanged
-                    ? `file-preview-line changed ${isModified ? "modified" : "added"}`
-                    : "file-preview-line";
-                  return (
-                    <div
-                      key={lineNo}
-                      className={className}
-                      onClick={isChanged ? (e) => handleLineClick(e, blockIndex) : undefined}
-                      title={isChanged ? "点击查看变更前后的代码" : undefined}
+          <pre
+            className={`file-preview-text file-preview-text-lines hljs ${wrapLines ? "wrap-lines" : ""}`}
+            style={{ margin: 0, padding: 0 }}
+            onScroll={() => setPopover(null)}
+          >
+            <code>
+              {highlightedLines.map((lineHtml, i) => {
+                const lineNo = i + 1;
+                const blockIndex = changeMap.lineToBlock.get(lineNo);
+                const isChanged = blockIndex !== undefined;
+                const isModified = isChanged && changeMap.blocks[blockIndex].hasOld;
+                const className = isChanged
+                  ? `file-preview-line changed ${isModified ? "modified" : "added"}`
+                  : "file-preview-line";
+                return (
+                  <div
+                    key={lineNo}
+                    className={className}
+                    onClick={isChanged ? (e) => handleLineClick(e, blockIndex) : undefined}
+                    title={isChanged ? "点击查看变更前后的代码" : undefined}
+                  >
+                    <span className="file-preview-line-num">{lineNo}</span>
+                    <span
+                      className="file-preview-line-content"
                       dangerouslySetInnerHTML={{ __html: lineHtml || "\u200b" }}
                     />
-                  );
-                })}
-              </code>
-            </pre>
-          ) : (
-            <pre className="file-preview-text hljs" style={{ margin: 0, padding: "16px" }}>
-              <code dangerouslySetInnerHTML={{ __html: highlighted }} />
-            </pre>
-          )
+                  </div>
+                );
+              })}
+            </code>
+          </pre>
         )}
 
         {fileType === "image" && imageUrl && (
-          <div className="file-preview-image-wrap">
-            <img src={imageUrl} alt={relPath} className="file-preview-image" />
+          <div className={`file-preview-image-wrap ${imageZoom === "original" ? "original-size" : "fit-size"}`}>
+            <img
+              src={imageUrl}
+              alt={relPath}
+              className="file-preview-image"
+              onLoad={(e) => {
+                const img = e.currentTarget;
+                setImageDimensions({ w: img.naturalWidth, h: img.naturalHeight });
+              }}
+            />
           </div>
         )}
 

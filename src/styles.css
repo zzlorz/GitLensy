@@ -2120,9 +2120,11 @@ input {
 .all-changes-toolbar {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 10px;
-  padding: 6px 12px;
+  padding: 6px 14px;
   border-bottom: 1px solid var(--border-subtle);
+  background-color: var(--bg-secondary);
   flex-shrink: 0;
 }
 
@@ -2132,6 +2134,7 @@ input {
   gap: 6px;
   font-size: 12px;
   color: var(--text-secondary);
+  font-weight: 600;
 }
 
 .all-changes-count {
@@ -2144,8 +2147,41 @@ input {
   color: var(--text-secondary);
 }
 
-.all-changes-toolbar .diff-view-toggle {
+.all-changes-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin-left: auto;
+}
+
+.all-changes-tool-btn,
+.diff-toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.all-changes-tool-btn:hover,
+.diff-toolbar-btn:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.all-changes-tool-btn.active,
+.diff-toolbar-btn.active {
+  background-color: var(--accent-subtle);
+  border-color: var(--accent-color);
+  color: var(--accent-color);
+  font-weight: 600;
 }
 
 .all-changes-scroll {
@@ -2173,6 +2209,51 @@ input {
   padding: 6px 12px;
   background-color: var(--bg-secondary);
   border-bottom: 1px solid var(--border-subtle);
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 0.12s ease;
+}
+
+.all-diff-file-header:hover {
+  background-color: var(--bg-tertiary);
+}
+
+.all-diff-file-header.collapsed {
+  opacity: 0.88;
+}
+
+.all-diff-file-chevron {
+  color: var(--text-muted);
+  transition: transform 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+  flex-shrink: 0;
+}
+
+.all-diff-file-chevron.collapsed {
+  transform: rotate(-90deg);
+}
+
+.all-diff-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  color: var(--text-muted);
+  opacity: 0.6;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.all-diff-file-header:hover .all-diff-copy-btn {
+  opacity: 1;
+}
+
+.all-diff-copy-btn:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .all-diff-file-path {
@@ -2526,6 +2607,75 @@ input {
   white-space: pre;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* 差异对比自动换行支持 */
+.diff-content.diff-wrap-lines .diff-table {
+  width: 100%;
+}
+
+.diff-content.diff-wrap-lines .diff-line-content {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.diff-content.diff-wrap-lines .diff-split-cell .diff-line-content {
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+/* Diff 内部图片展示 */
+.diff-image-preview-wrap {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 280px;
+  background-color: var(--bg-primary);
+}
+
+.diff-image-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 14px;
+  background-color: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+
+.diff-image-canvas {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  overflow: auto;
+  background-color: var(--bg-tertiary);
+  background-image:
+    linear-gradient(45deg, rgba(128, 128, 128, 0.12) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(128, 128, 128, 0.12) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(128, 128, 128, 0.12) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(128, 128, 128, 0.12) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+}
+
+.diff-image-preview-wrap.fit-size .diff-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+  border-radius: 4px;
+}
+
+.diff-image-preview-wrap.original-size .diff-image {
+  max-width: none;
+  max-height: none;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+  border-radius: 4px;
 }
 
 .diff-split-cell.add {
@@ -3235,48 +3385,94 @@ input {
 /* 历史列表：未提交的变更条目 */
 .commit-item.uncommitted-item {
   border-left-color: transparent;
+  transition: all 0.15s ease;
 }
 
 .commit-item.uncommitted-item.has-changes {
   border-left-color: var(--modified-color);
+  background-color: rgba(224, 164, 88, 0.04);
+}
+
+.commit-item.uncommitted-item.has-changes:hover {
+  background-color: rgba(224, 164, 88, 0.09);
 }
 
 .commit-item.uncommitted-item.selected {
-  border-left-color: var(--accent-color);
+  border-left-color: var(--accent-color) !important;
+  background-color: var(--bg-hover) !important;
 }
 
-.commit-uncommitted-graph {
-  justify-content: center;
+.commit-item.uncommitted-item.is-clean {
+  opacity: 0.82;
 }
 
-.uncommitted-icon-dirty {
-  color: var(--modified-color);
-}
-
-.uncommitted-icon-clean {
-  color: var(--text-muted);
-  opacity: 0.8;
+.commit-item.uncommitted-item.is-clean:hover {
+  opacity: 1;
 }
 
 .uncommitted-subject {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
+}
+
+.uncommitted-title {
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 .uncommitted-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 15px;
-  height: 15px;
-  padding: 0 4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
   border-radius: 8px;
   background-color: var(--modified-color);
   color: #fff;
   font-size: 9.5px;
   font-weight: 700;
-  line-height: 15px;
+  line-height: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+/* 状态芯片胶囊：暂存 / 未暂存 */
+.uncommitted-meta-chips {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 11px;
+}
+
+.uncommitted-meta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 500;
+}
+
+.uncommitted-meta-chip.staged {
+  color: var(--added-color);
+}
+
+.uncommitted-meta-chip.unstaged {
+  color: var(--modified-color);
+}
+
+.uncommitted-chip-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.uncommitted-chip-dot.staged {
+  background-color: var(--added-color);
+}
+
+.uncommitted-chip-dot.unstaged {
+  background-color: var(--modified-color);
 }
 
 .commit-uncommitted-count {
@@ -3287,11 +3483,8 @@ input {
   color: var(--modified-color);
 }
 
-.commit-uncommitted-count.clean {
-  color: var(--text-secondary);
-}
-
-.commit-uncommitted-hint {
+.commit-uncommitted-clean-text {
+  font-size: 11px;
   color: var(--text-muted);
 }
 
@@ -3638,7 +3831,10 @@ input {
 
 /* 折叠在「未提交的变更」记录下方的文件列表 */
 .commit-uncommitted-expand {
-  background-color: var(--bg-secondary);
+  background-color: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border-color);
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.12);
+  animation: repo-dropdown-in 0.12s ease-out;
 }
 
 /* 折叠块内的字体整体小一号 */
@@ -4498,8 +4694,8 @@ input {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 10px 16px;
+  gap: 10px;
+  padding: 6px 14px;
   border-bottom: 1px solid var(--border-subtle);
   background-color: var(--bg-secondary);
   flex-shrink: 0;
@@ -4508,7 +4704,7 @@ input {
 .file-preview-header-path {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text-primary);
@@ -4519,15 +4715,59 @@ input {
   min-width: 0;
 }
 
-.file-preview-header-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.file-preview-type-icon {
+  color: var(--text-muted);
   flex-shrink: 0;
 }
 
-/* 预览头部的「在编辑器中打开」 */
-.file-preview-action {
+.file-preview-path-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-preview-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  color: var(--text-muted);
+  opacity: 0.65;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.file-preview-copy-btn:hover {
+  opacity: 1;
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.file-preview-switch-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--accent-color);
+  background-color: var(--accent-subtle);
+  border: 1px solid rgba(47, 129, 247, 0.3);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.file-preview-switch-btn:hover {
+  background-color: var(--accent-color);
+  color: #ffffff;
+}
+
+.file-preview-close-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -4535,11 +4775,48 @@ input {
   height: 22px;
   border-radius: 4px;
   color: var(--text-muted);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  margin-left: 2px;
+}
+
+.file-preview-close-btn:hover {
+  background-color: var(--deleted-bg);
+  color: var(--deleted-color);
+}
+
+.file-preview-header-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex-shrink: 0;
+}
+
+/* 预览头部的「在编辑器中打开」及其他操作 */
+.file-preview-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
 }
 
 .file-preview-action:hover {
   background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.file-preview-action.active {
+  background-color: var(--accent-subtle);
   color: var(--accent-color);
 }
 
@@ -4574,7 +4851,7 @@ input {
   flex: 1;
   overflow: auto;
   margin: 0;
-  padding: 16px;
+  padding: 0;
   font-family: var(--font-mono);
   font-size: var(--preview-font-size);
   line-height: var(--preview-line-height);
@@ -4591,31 +4868,67 @@ input {
   padding: 0;
 }
 
-/* ── 变更行标注（文件夹预览内） ───────────────────────────── */
+/* ── 行号栏与代码行结构 ───────────────────────────── */
 .file-preview-text-lines code {
   display: block;
 }
 
 .file-preview-line {
-  display: block;
-  width: max-content;
-  min-width: 100%;
+  display: flex;
+  align-items: flex-start;
   min-height: 1.5em;
+  min-width: 100%;
+  width: max-content;
   white-space: pre;
+  transition: background-color 0.1s ease;
+}
+
+.file-preview-line:hover {
+  background-color: var(--bg-hover);
+}
+
+.file-preview-line-num {
+  width: 4.2em;
+  text-align: right;
+  padding: 0 10px 0 6px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  border-right: 1px solid var(--border-subtle);
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+  font-size: max(9px, calc(var(--preview-font-size) - 1px));
+}
+
+.file-preview-line-content {
+  flex: 1;
+  padding: 0 16px 0 12px;
+  white-space: pre;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.file-preview-text.wrap-lines .file-preview-line {
+  width: 100%;
+}
+
+.file-preview-text.wrap-lines .file-preview-line-content {
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 .file-preview-line.changed {
   background-color: var(--added-line-bg);
-  box-shadow: inset 2px 0 0 var(--added-color);
+  box-shadow: inset 3px 0 0 var(--added-color);
   cursor: pointer;
 }
 
 .file-preview-line.changed.modified {
-  box-shadow: inset 2px 0 0 var(--modified-color);
+  box-shadow: inset 3px 0 0 var(--modified-color);
 }
 
 .file-preview-line.changed:hover {
-  background-image: linear-gradient(rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.07));
+  filter: brightness(1.12);
 }
 
 .file-preview-change-count {
@@ -4713,15 +5026,29 @@ input {
   justify-content: center;
   padding: 24px;
   overflow: auto;
-  background-color: rgba(0, 0, 0, 0.15);
+  background-color: var(--bg-tertiary);
+  background-image:
+    linear-gradient(45deg, rgba(128, 128, 128, 0.12) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(128, 128, 128, 0.12) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(128, 128, 128, 0.12) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(128, 128, 128, 0.12) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
 }
 
-.file-preview-image {
+.file-preview-image-wrap.fit-size .file-preview-image {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
   border-radius: 4px;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+}
+
+.file-preview-image-wrap.original-size .file-preview-image {
+  max-width: none;
+  max-height: none;
+  border-radius: 4px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
 }
 
 .file-preview-read-error {

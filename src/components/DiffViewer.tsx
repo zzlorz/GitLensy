@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { readFile } from "@tauri-apps/plugin-fs";
 import {
   FileCode2,
   ArrowRight,
@@ -10,11 +11,19 @@ import {
   ChevronDown,
   ExternalLink,
   Hash,
+  WrapText,
+  Image as ImageIcon,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
 import type { FileDiff, ChangedFile, DiffView, DiffHunk, DiffLine } from "../types";
 import { openPath } from "../api/tauri";
 import type { OpenMethod } from "../api/tauri";
-import { highlightLine, languageForPath } from "../lib/highlight";
+import { highlightLine, languageForPath, getExtension } from "../lib/highlight";
+
+const IMAGE_EXTENSIONS = new Set([
+  "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "ico", "tiff", "tif", "avif"
+]);
 
 /** 预览页「打开方式」下拉选项 */
 const OPEN_METHODS: { id: OpenMethod; label: string }[] = [
@@ -32,6 +41,8 @@ interface Props {
   contextLabel?: string;
   /** 仓库根目录；提供时在头部显示「打开方式」（历史提交视图不传） */
   repoPath?: string;
+  /** 切换到完整文件内容预览（单文件视图提供） */
+  onSwitchToFile?: () => void;
 }
 
 function statusLabel(status: string): string {
@@ -99,11 +110,20 @@ function buildSplitRows(hunk: DiffHunk): SplitRow[] {
   return rows;
 }
 
-export default function DiffViewer({ diff, file, view, onViewChange, contextLabel, repoPath }: Props) {
+export default function DiffViewer({
+  diff,
+  file,
+  view,
+  onViewChange,
+  contextLabel,
+  repoPath,
+  onSwitchToFile,
+}: Props) {
   const [copied, setCopied] = useState(false);
   // 单文件视图默认统一单栏，不再沿用上次的双栏选择
   const [layout, setLayout] = useState<DiffLayout>("unified");
   const [openMenuOpen, setOpenMenuOpen] = useState(false);
+  const [wrap, setWrap] = useState(false);
   const openMenuRef = useRef<HTMLDivElement>(null);
   const changeLayout = (next: DiffLayout) => {
     setLayout(next);
@@ -174,6 +194,27 @@ export default function DiffViewer({ diff, file, view, onViewChange, contextLabe
             </button>
           </div>
 
+          {/* 差异对比 ↔ 完整文件切换 */}
+          {onSwitchToFile && (
+            <div className="diff-view-toggle">
+              <button
+                type="button"
+                className="diff-view-btn active"
+                title="当前为变更对比视图"
+              >
+                差异对比
+              </button>
+              <button
+                type="button"
+                className="diff-view-btn"
+                onClick={onSwitchToFile}
+                title="查看该文件的完整源码内容"
+              >
+                完整文件
+              </button>
+            </div>
+          )}
+
           {hasBoth && (
             <div className="diff-view-toggle">
               <button
@@ -233,6 +274,16 @@ export default function DiffViewer({ diff, file, view, onViewChange, contextLabe
             </>
           )}
 
+          <button
+            type="button"
+            className={`diff-toolbar-btn ${wrap ? "active" : ""}`}
+            onClick={() => setWrap((w) => !w)}
+            title={wrap ? "取消自动换行（单行横向滚动）" : "开启自动换行（防止超长代码被遮挡）"}
+          >
+            <WrapText size={12} />
+            <span>换行</span>
+          </button>
+
           {repoPath && !isDeleted && (
             <div className="diff-open-with" ref={openMenuRef}>
               <button
@@ -270,8 +321,100 @@ export default function DiffViewer({ diff, file, view, onViewChange, contextLabe
         </div>
       </div>
 
-      <DiffBody diff={diff} layout={layout} filePath={displayPath} />
+      <DiffBody
+        diff={diff}
+        layout={layout}
+        filePath={displayPath}
+        wrap={wrap}
+        repoPath={repoPath}
+      />
     </>
+  );
+}
+
+/** 图片文件在 Diff 区域内的展示 */
+function ImageDiffBody({
+  repoPath,
+  filePath,
+}: {
+  repoPath?: string;
+  filePath?: string;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [dim, setDim] = useState<{ w: number; h: number } | null>(null);
+  const [zoom, setZoom] = useState<"fit" | "original">("fit");
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const urlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!repoPath || !filePath) return;
+    let cancelled = false;
+    const full = `${repoPath.replace(/[\\/]+$/, "")}/${filePath}`;
+    const ext = getExtension(filePath);
+
+    readFile(full)
+      .then((bytes) => {
+        if (cancelled) return;
+        const mime =
+          ext === "svg" ? "image/svg+xml" : `image/${ext === "jpg" ? "jpeg" : ext}`;
+        const blob = new Blob([bytes], { type: mime });
+        const objUrl = URL.createObjectURL(blob);
+        urlRef.current = objUrl;
+        setUrl(objUrl);
+      })
+      .catch((e) => {
+        if (!cancelled) setLoadErr(e instanceof Error ? e.message : String(e));
+      });
+
+    return () => {
+      cancelled = true;
+      if (urlRef.current) {
+        URL.revokeObjectURL(urlRef.current);
+        urlRef.current = null;
+      }
+    };
+  }, [repoPath, filePath]);
+
+  if (loadErr || !url) {
+    return (
+      <div className="binary-notice">
+        <ImageIcon size={36} strokeWidth={1.5} />
+        <div>图片文件：{filePath}</div>
+        <div style={{ fontSize: 11, color: "var(--text-muted)" }}>
+          {loadErr || "正在读取图片数据..."}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`diff-image-preview-wrap ${zoom === "original" ? "original-size" : "fit-size"}`}>
+      <div className="diff-image-toolbar">
+        <span className="diff-image-info">
+          图片预览 {dim ? `(${dim.w} × ${dim.h} px)` : ""}
+        </span>
+        <button
+          type="button"
+          className={`diff-toolbar-btn ${zoom === "original" ? "active" : ""}`}
+          onClick={() => setZoom((z) => (z === "fit" ? "original" : "fit"))}
+          title={zoom === "fit" ? "自适应窗口，点击切换至 1:1 原始尺寸" : "原始尺寸，点击切换至自适应窗口"}
+        >
+          {zoom === "fit" ? <Maximize2 size={12} /> : <Minimize2 size={12} />}
+          <span>{zoom === "fit" ? "自适应" : "1:1"}</span>
+        </button>
+      </div>
+      <div className="diff-image-canvas">
+        <img
+          src={url}
+          alt={filePath}
+          className="diff-image"
+          onLoad={(e) => {
+            const img = e.currentTarget;
+            setDim({ w: img.naturalWidth, h: img.naturalHeight });
+          }}
+        />
+      </div>
+    </div>
   );
 }
 
@@ -285,11 +428,16 @@ function DiffLineContent({
 }) {
   const html = highlightLine(content, language);
   if (html === null) {
-    return <span className="diff-line-content">{content || " "}</span>;
+    return (
+      <span className="diff-line-content" title={content}>
+        {content || " "}
+      </span>
+    );
   }
   return (
     <span
       className="diff-line-content diff-line-highlighted"
+      title={content}
       dangerouslySetInnerHTML={{ __html: html || " " }}
     />
   );
@@ -300,20 +448,30 @@ export function DiffBody({
   diff,
   layout,
   filePath,
+  wrap = false,
+  repoPath,
 }: {
   diff: FileDiff;
   layout: DiffLayout;
   /** 用于推断语法高亮语言的文件路径 */
   filePath?: string;
+  wrap?: boolean;
+  repoPath?: string;
 }) {
   const language = useMemo(
     () => (filePath ? languageForPath(filePath) : null),
     [filePath],
   );
 
+  const isImageFile = filePath ? IMAGE_EXTENSIONS.has(getExtension(filePath)) : false;
+
   return (
-    <div className="diff-content">
-      {diff.is_binary && (
+    <div className={`diff-content ${wrap ? "diff-wrap-lines" : ""}`}>
+      {diff.is_binary && isImageFile && (
+        <ImageDiffBody repoPath={repoPath} filePath={filePath} />
+      )}
+
+      {diff.is_binary && !isImageFile && (
         <div className="binary-notice">
           <Binary size={36} strokeWidth={1.5} />
           <div>二进制文件，无法展示文本 Diff</div>
