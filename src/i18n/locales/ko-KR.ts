@@ -18,6 +18,7 @@ export const koKR: TranslationSchema = {
     clear: "지우기",
     apply: "적용",
     restore: "복원",
+    revert: "되돌리기",
     resetDefault: "기본값 복원",
     processing: "처리 중...",
     unknown: "알 수 없음",

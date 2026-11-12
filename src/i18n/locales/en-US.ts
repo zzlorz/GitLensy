@@ -18,6 +18,7 @@ export const enUS: TranslationSchema = {
     clear: "Clear",
     apply: "Apply",
     restore: "Restore",
+    revert: "Revert",
     resetDefault: "Reset to default",
     processing: "Processing...",
     unknown: "Unknown",

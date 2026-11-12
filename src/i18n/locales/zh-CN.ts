@@ -16,6 +16,7 @@ export const zhCN = {
     clear: "清空",
     apply: "应用",
     restore: "恢复",
+    revert: "撤销",
     resetDefault: "恢复默认",
     processing: "处理中...",
     unknown: "未知",

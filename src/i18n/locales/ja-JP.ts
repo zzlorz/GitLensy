@@ -18,6 +18,7 @@ export const jaJP: TranslationSchema = {
     clear: "クリア",
     apply: "適用",
     restore: "復元",
+    revert: "元に戻す",
     resetDefault: "デフォルトに戻す",
     processing: "処理中...",
     unknown: "不明",
