@@ -574,7 +574,7 @@ pub async fn sync_changes(state: State<'_, AppState>) -> AppResult<()> {
     Ok(())
 }
 
-/// 拉取远程变更（仅快进，不产生合并提交）
+/// 拉取远程变更（分叉时自动 rebase，否则快进）
 #[tauri::command]
 pub async fn pull_changes(state: State<'_, AppState>) -> AppResult<()> {
     let repo_path = {
@@ -598,11 +598,13 @@ pub async fn pull_changes(state: State<'_, AppState>) -> AppResult<()> {
             "当前分支未关联远程分支，无法拉取".to_string(),
         ));
     }
-    if sync.ahead > 0 && sync.behind > 0 {
-        return Err(diverged_pull_error(&sync));
-    }
 
-    git::run_git(path, &["pull", "--ff-only"])?;
+    // 本地与远程分叉时，用 rebase 将本地提交接到远程最新提交之后
+    if sync.ahead > 0 && sync.behind > 0 {
+        git::run_git(path, &["pull", "--rebase"])?;
+    } else {
+        git::run_git(path, &["pull", "--ff-only"])?;
+    }
     Ok(())
 }
 
